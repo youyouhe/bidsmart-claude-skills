@@ -1,0 +1,35 @@
+{
+  "name": "bidsmart-skills",
+  "owner": {
+    "name": "BidSmart Team",
+    "email": "team@bidsmart.local"
+  },
+  "metadata": {
+    "description": "Comprehensive bid management skills for government procurement projects"
+  },
+  "plugins": [
+    {
+      "name": "bidsmart-skills",
+      "source": "./",
+      "description": "Complete collection of bid analysis, proposal writing, material extraction, and document assembly skills for Chinese government procurement",
+      "author": {
+        "name": "BidSmart Team"
+      },
+      "license": "MIT",
+      "keywords": [
+        "bid-management",
+        "government-procurement",
+        "proposal-writing",
+        "document-analysis",
+        "chinese-tenders"
+      ],
+      "category": "workflow",
+      "tags": [
+        "bid-analysis",
+        "proposal-writing",
+        "document-automation",
+        "government-procurement"
+      ]
+    }
+  ]
+}
