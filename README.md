@@ -22,7 +22,21 @@ Comprehensive Claude Code skills for Chinese government procurement and bid mana
 
 ## 📦 Installation
 
-### Method 1: GitHub Source (Recommended)
+### Method 1: Command Line (Recommended - Easiest)
+
+In Claude Code, run these commands:
+
+```bash
+# Add the marketplace
+/plugin marketplace add youyouhe/bidsmart-claude-skills
+
+# Install the plugin
+/plugin install bidsmart-skills@bidsmart-skills
+```
+
+That's it! Restart Claude Code and all 11 skills will be available.
+
+### Method 2: Manual Configuration
 
 Add to your project's `.claude/settings.local.json`:
 
@@ -42,7 +56,7 @@ Add to your project's `.claude/settings.local.json`:
 }
 ```
 
-### Method 2: Local Development
+### Method 3: Local Development
 
 Clone this repository and use local path:
 

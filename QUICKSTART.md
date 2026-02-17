@@ -10,11 +10,25 @@ Get started with BidSmart Claude Skills in 5 minutes.
 
 ## Installation
 
-### Step 1: Add the Marketplace
+### Step 1: Install the Plugin
 
 Choose one of these methods:
 
-#### Option A: From GitHub (Recommended for production)
+#### Option A: Command Line (Easiest - Recommended)
+
+In Claude Code, run:
+
+```bash
+# Add marketplace
+/plugin marketplace add youyouhe/bidsmart-claude-skills
+
+# Install plugin
+/plugin install bidsmart-skills@bidsmart-skills
+```
+
+Done! Skip to Step 2.
+
+#### Option B: Manual Configuration
 
 1. In your project directory, edit `.claude/settings.local.json`:
 
@@ -34,7 +48,7 @@ Choose one of these methods:
 }
 ```
 
-#### Option B: Local Development
+#### Option C: Local Development
 
 ```bash
 # Clone the repository
