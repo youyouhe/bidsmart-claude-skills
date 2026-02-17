@@ -32,7 +32,7 @@ Add to your project's `.claude/settings.local.json`:
     "bidsmart": {
       "source": {
         "source": "github",
-        "repo": "YOUR_USERNAME/bidsmart-claude-skills"
+        "repo": "youyouhe/bidsmart-claude-skills"
       }
     }
   },
@@ -47,7 +47,7 @@ Add to your project's `.claude/settings.local.json`:
 Clone this repository and use local path:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/bidsmart-claude-skills.git
+git clone https://github.com/youyouhe/bidsmart-claude-skills.git
 ```
 
 Add to `.claude/settings.local.json`:

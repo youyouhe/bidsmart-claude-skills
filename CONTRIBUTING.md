@@ -7,7 +7,7 @@ Thank you for your interest in contributing! This document provides guidelines f
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/bidsmart-claude-skills.git
+   git clone https://github.com/youyouhe/bidsmart-claude-skills.git
    cd bidsmart-claude-skills
    ```
 3. **Create a branch** for your changes:
@@ -179,7 +179,7 @@ We especially welcome contributions in:
 
 If you have questions about contributing:
 
-1. Check existing [issues](https://github.com/YOUR_USERNAME/bidsmart-claude-skills/issues)
+1. Check existing [issues](https://github.com/youyouhe/bidsmart-claude-skills/issues)
 2. Open a new issue with the `question` label
 3. Join discussions in pull requests
 

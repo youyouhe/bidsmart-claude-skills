@@ -24,7 +24,7 @@ Choose one of these methods:
     "bidsmart": {
       "source": {
         "source": "github",
-        "repo": "YOUR_USERNAME/bidsmart-claude-skills"
+        "repo": "youyouhe/bidsmart-claude-skills"
       }
     }
   },
@@ -38,7 +38,7 @@ Choose one of these methods:
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/bidsmart-claude-skills.git ~/bidsmart-claude-skills
+git clone https://github.com/youyouhe/bidsmart-claude-skills.git ~/bidsmart-claude-skills
 
 # Add to .claude/settings.local.json
 {
@@ -239,8 +239,8 @@ export LANG=zh_CN.UTF-8
 ## Getting Help
 
 - 📖 Read the full [README](README.md)
-- 🐛 Report issues on [GitHub](https://github.com/YOUR_USERNAME/bidsmart-claude-skills/issues)
-- 💬 Check [Discussions](https://github.com/YOUR_USERNAME/bidsmart-claude-skills/discussions)
+- 🐛 Report issues on [GitHub](https://github.com/youyouhe/bidsmart-claude-skills/issues)
+- 💬 Check [Discussions](https://github.com/youyouhe/bidsmart-claude-skills/discussions)
 
 ## Pro Tips
 

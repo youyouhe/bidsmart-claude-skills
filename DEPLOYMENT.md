@@ -49,11 +49,11 @@ cd ~/bidsmart-claude-skills
 
 ### Connect to GitHub
 
-Replace `YOUR_USERNAME` with your actual GitHub username:
+Replace `youyouhe` with your actual GitHub username:
 
 ```bash
 # Add GitHub as remote
-git remote add origin https://github.com/YOUR_USERNAME/bidsmart-claude-skills.git
+git remote add origin https://github.com/youyouhe/bidsmart-claude-skills.git
 
 # Rename branch to main (if needed)
 git branch -M main
@@ -73,7 +73,7 @@ cat ~/.ssh/id_ed25519.pub
 # Go to GitHub → Settings → SSH and GPG keys → New SSH key
 
 # Use SSH remote
-git remote set-url origin git@github.com:YOUR_USERNAME/bidsmart-claude-skills.git
+git remote set-url origin git@github.com:youyouhe/bidsmart-claude-skills.git
 git push -u origin main
 ```
 
@@ -131,13 +131,13 @@ After deploying, update the placeholder URLs in your documentation:
 
 ```bash
 # Update README.md
-sed -i 's/YOUR_USERNAME/your-actual-username/g' README.md
+sed -i 's/youyouhe/your-actual-username/g' README.md
 
 # Update CONTRIBUTING.md
-sed -i 's/YOUR_USERNAME/your-actual-username/g' CONTRIBUTING.md
+sed -i 's/youyouhe/your-actual-username/g' CONTRIBUTING.md
 
 # Update QUICKSTART.md
-sed -i 's/YOUR_USERNAME/your-actual-username/g' QUICKSTART.md
+sed -i 's/youyouhe/your-actual-username/g' QUICKSTART.md
 
 # Commit and push
 git add .
@@ -163,7 +163,7 @@ cat > .claude/settings.local.json << 'EOF'
     "bidsmart": {
       "source": {
         "source": "github",
-        "repo": "YOUR_USERNAME/bidsmart-claude-skills"
+        "repo": "youyouhe/bidsmart-claude-skills"
       }
     }
   },
@@ -187,9 +187,9 @@ claude
 Add status badges at the top of README.md:
 
 ```markdown
-[![GitHub release](https://img.shields.io/github/v/release/YOUR_USERNAME/bidsmart-claude-skills)](https://github.com/YOUR_USERNAME/bidsmart-claude-skills/releases)
+[![GitHub release](https://img.shields.io/github/v/release/youyouhe/bidsmart-claude-skills)](https://github.com/youyouhe/bidsmart-claude-skills/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub stars](https://img.shields.io/github/stars/YOUR_USERNAME/bidsmart-claude-skills)](https://github.com/YOUR_USERNAME/bidsmart-claude-skills/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/youyouhe/bidsmart-claude-skills)](https://github.com/youyouhe/bidsmart-claude-skills/stargazers)
 ```
 
 ### Share Your Work
