@@ -258,6 +258,53 @@ class MaterialHubClient:
         logger.warning(f"Get material details failed: {resp.status_code if resp else 'no response'}")
         return None
 
+    def get_company_complete(self, company_id: int) -> Optional[dict]:
+        """获取公司完整信息（聚合API）
+
+        使用 MaterialHub 的聚合 API，一次性获取：
+        - 公司基本信息
+        - 员工列表
+        - 所有材料
+        - 聚合的扩展字段（注册资本、成立日期等）
+        - 统计信息
+
+        Args:
+            company_id: 公司 ID
+
+        Returns:
+            完整的公司信息，包含 aggregated_info 字段
+        """
+        resp = self._request("GET", f"/api/companies/{company_id}/complete")
+        if resp and resp.status_code == 200:
+            return resp.json()
+
+        logger.warning(f"Get company complete failed: {resp.status_code if resp else 'no response'}")
+        return None
+
+    def get_person_complete(self, person_id: int) -> Optional[dict]:
+        """获取人员完整信息（聚合API）
+
+        使用 MaterialHub 的聚合 API，一次性获取：
+        - 人员基本信息
+        - 所属公司
+        - 所有材料
+        - 聚合的扩展字段（性别、出生日期、年龄、学历等）
+        - 证书列表
+        - 统计信息
+
+        Args:
+            person_id: 人员 ID
+
+        Returns:
+            完整的人员信息，包含 aggregated_info 和 certificates 字段
+        """
+        resp = self._request("GET", f"/api/persons/{person_id}/complete")
+        if resp and resp.status_code == 200:
+            return resp.json()
+
+        logger.warning(f"Get person complete failed: {resp.status_code if resp else 'no response'}")
+        return None
+
     def search_materials(
         self,
         q: Optional[str] = None,

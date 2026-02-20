@@ -507,6 +507,85 @@ Authorization: Bearer <token>
 
 ---
 
+### 4. 获取公司完整信息（聚合API）
+
+**GET** `/api/companies/{company_id}/complete`
+
+获取公司的完整信息，包括基本信息、员工列表、所有材料及聚合的扩展信息（一次性获取所有关联数据）。
+
+**响应**:
+```json
+{
+  "company": {
+    "id": 1,
+    "name": "琪信通达（北京）科技有限公司",
+    "legal_person": "王春红",
+    "credit_code": "91110111674272168B",
+    "address": "北京市海淀区中关村大街17号10号楼3层301室-2040",
+    "created_at": "2026-02-17T16:16:37.020279",
+    "updated_at": "2026-02-17T16:16:37.020284"
+  },
+  "employees": [
+    {
+      "id": 1,
+      "name": "张三",
+      "id_number": "110101199001011234",
+      "education": "本科",
+      "position": "项目经理",
+      "company_id": 1,
+      "created_at": "2026-02-18T10:00:00",
+      "updated_at": "2026-02-18T10:00:00",
+      "material_count": 5
+    }
+  ],
+  "materials": [
+    {
+      "id": 11,
+      "document_id": 1,
+      "company_id": 1,
+      "person_id": null,
+      "title": "营业执照",
+      "material_type": "license",
+      "image_url": "/api/files/营业执照.png",
+      "expiry_date": "2025-12-31",
+      "is_expired": false,
+      "extracted_data": {
+        "company_name": "琪信通达（北京）科技有限公司",
+        "legal_person": "王春红",
+        "credit_code": "91110111674272168B",
+        "address": "北京市海淀区...",
+        "registered_capital": "2001万元",
+        "company_type": "有限责任公司(自然人投资或控股)",
+        "establishment_date": "2008-04-14"
+      },
+      "ocr_status": "completed",
+      "created_at": "2026-02-17T15:58:10"
+    }
+  ],
+  "aggregated_info": {
+    "registered_capital": "2001万元",
+    "establishment_date": "2008-04-14",
+    "company_type": "有限责任公司(自然人投资或控股)",
+    "business_scope": "技术开发、技术咨询...",
+    "operating_period": "2008-04-14至长期"
+  },
+  "statistics": {
+    "total_materials": 74,
+    "total_employees": 12,
+    "expired_materials": 2,
+    "valid_materials": 72
+  }
+}
+```
+
+**说明**:
+- 一次性返回公司的所有关联数据
+- `aggregated_info` 从营业执照材料的 OCR 结果中自动提取扩展字段
+- 包含注册资本、成立日期、公司类型等数据库表中未存储的字段
+- 适合用于投标文件生成等需要完整公司信息的场景
+
+---
+
 ## 人员管理 (/api/persons)
 
 **所有端点均需要认证。**
@@ -574,6 +653,121 @@ Authorization: Bearer <token>
   ]
 }
 ```
+
+---
+
+### 4. 获取人员完整信息（聚合API）
+
+**GET** `/api/persons/{person_id}/complete`
+
+获取人员的完整信息，包括基本信息、所属公司、所有材料、聚合的扩展信息及证书列表（一次性获取所有关联数据）。
+
+**响应**:
+```json
+{
+  "person": {
+    "id": 11,
+    "name": "周杨",
+    "id_number": "411023200112043047",
+    "education": "本科",
+    "position": "高级工程师",
+    "company_id": 1,
+    "created_at": "2026-02-17T16:33:18",
+    "updated_at": "2026-02-17T16:33:18"
+  },
+  "company": {
+    "id": 1,
+    "name": "琪信通达（北京）科技有限公司",
+    "legal_person": "王春红",
+    "credit_code": "91110111674272168B",
+    "address": "北京市海淀区..."
+  },
+  "materials": [
+    {
+      "id": 5,
+      "document_id": 1,
+      "company_id": null,
+      "person_id": 11,
+      "title": "身份证",
+      "material_type": "id_card",
+      "image_url": "/api/files/身份证.png",
+      "extracted_data": {
+        "name": "周杨",
+        "gender": "女",
+        "nation": "汉",
+        "birth_date": "2001-12-04",
+        "id_number": "411023200112043047",
+        "address": "河南省许昌县小召乡唐庄"
+      },
+      "ocr_status": "completed",
+      "created_at": "2026-02-17T15:58:10"
+    },
+    {
+      "id": 23,
+      "title": "学历证书",
+      "material_type": "education",
+      "extracted_data": {
+        "name": "周杨",
+        "degree": "本科",
+        "major": "计算机科学与技术",
+        "university": "北京大学",
+        "graduation_date": "2023-06-30"
+      }
+    }
+  ],
+  "aggregated_info": {
+    "gender": "女",
+    "birth_date": "2001-12-04",
+    "age": 24,
+    "nation": "汉",
+    "address": "河南省许昌县小召乡唐庄",
+    "major": "计算机科学与技术",
+    "degree": "本科",
+    "university": "北京大学",
+    "graduation_date": "2023-06-30"
+  },
+  "certificates": [
+    {
+      "material_id": 45,
+      "title": "软件设计师证书",
+      "type": "certificate",
+      "cert_number": "12345678",
+      "issue_date": "2022-05-20",
+      "expiry_date": null,
+      "issue_authority": "工业和信息化部",
+      "is_expired": false
+    },
+    {
+      "material_id": 46,
+      "title": "PMP项目管理专业人士认证",
+      "type": "certificate",
+      "cert_number": "PMI98765",
+      "issue_date": "2023-03-15",
+      "expiry_date": "2026-03-15",
+      "issue_authority": "Project Management Institute",
+      "is_expired": false
+    }
+  ],
+  "statistics": {
+    "total_materials": 8,
+    "total_certificates": 2,
+    "expired_certificates": 0,
+    "valid_certificates": 2
+  }
+}
+```
+
+**说明**:
+- 一次性返回人员的所有关联数据
+- `aggregated_info` 从身份证、学历证书等材料的 OCR 结果中自动提取扩展字段
+- 包含性别、出生日期、年龄（自动计算）、民族、住址、专业、学历等数据库表中未存储的字段
+- `certificates` 列表汇总了该人员的所有证书材料（含证书编号、有效期等）
+- 适合用于投标文件生成、人员信息填报等需要完整人员信息的场景
+
+**聚合字段来源**:
+- **身份证 (id_card)**: gender, birth_date, age, nation, address
+- **学历证书 (education)**: major, degree, university, graduation_date
+- **证书 (certificate)**: 自动汇总所有证书信息到 certificates 列表
 
 ---
 
@@ -769,6 +963,32 @@ curl -X POST http://localhost:8201/api/documents \
 ### 4. 使用 Web UI
 访问 http://localhost:3100，使用 `admin` / `admin123` 登录。
 
+### 5. 使用聚合API获取完整信息
+
+```bash
+# 获取公司完整信息（包含员工、材料、扩展字段）
+curl http://localhost:8201/api/companies/1/complete \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq '{
+      company: .company.name,
+      registered_capital: .aggregated_info.registered_capital,
+      employees: .statistics.total_employees,
+      materials: .statistics.total_materials
+    }'
+
+# 获取人员完整信息（包含公司、材料、证书、扩展字段）
+curl http://localhost:8201/api/persons/1/complete \
+  -H "Authorization: Bearer $TOKEN" \
+  | jq '{
+      name: .person.name,
+      age: .aggregated_info.age,
+      gender: .aggregated_info.gender,
+      education: .aggregated_info.degree,
+      major: .aggregated_info.major,
+      certificates: [.certificates[] | .title]
+    }'
+```
+
 ---
 
 ## 开发指南
@@ -923,9 +1143,41 @@ A: 建议配置：
 4. 添加 API 限流
 5. 定期备份数据库
 
+### Q: 聚合API和普通API有什么区别？
+A:
+- **普通API** (`/api/companies/{id}`, `/api/persons/{id}`)：只返回数据库表中的字段
+- **聚合API** (`/api/companies/{id}/complete`, `/api/persons/{id}/complete`)：
+  - 一次性返回所有关联数据（员工、材料、证书等）
+  - 自动从材料的 OCR 结果中提取扩展字段
+  - 包含统计信息
+  - 适合需要完整信息的场景（如投标文件生成）
+
+**示例**：公司聚合API额外返回：
+- `aggregated_info.registered_capital` - 注册资本（从营业执照OCR提取）
+- `aggregated_info.establishment_date` - 成立日期
+- `aggregated_info.company_type` - 公司类型
+- `employees` - 员工列表
+- `materials` - 所有材料列表
+- `statistics` - 统计信息
+
+### Q: OCR提取的字段存储在哪里？
+A:
+- **核心字段**：存储在数据库表中（如 Company.name, Person.id_number）
+- **扩展字段**：存储在 `Material.extracted_json` 的 `extracted_data` 对象中
+- **访问方式**：
+  - 直接获取材料：`GET /api/materials/{id}` → `extracted_data` 字段
+  - 聚合API：`GET /api/companies/{id}/complete` → `aggregated_info` 字段（自动聚合）
+
 ---
 
 ## 版本历史
+
+### v1.2.0 (2026-02-21)
+- ✨ 添加公司完整信息聚合API (`/api/companies/{id}/complete`)
+- ✨ 添加人员完整信息聚合API (`/api/persons/{id}/complete`)
+- 📊 自动从OCR结果聚合扩展字段（注册资本、性别、年龄等）
+- 📋 证书信息自动汇总功能
+- 🎯 优化投标文件生成场景的数据获取
 
 ### v1.1.0 (2026-02-20)
 - ✨ 添加 Session-based 认证系统
