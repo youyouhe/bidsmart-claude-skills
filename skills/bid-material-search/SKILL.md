@@ -1,50 +1,112 @@
 ---
 name: bid-material-search
 description: >
-  基于已提取的投标资料图片和index.json索引，构建FastAPI检索服务，
-  支持关键词搜索、分类过滤、文档类型查询，提供图片静态文件服务，
+  基于 MaterialHub API 构建投标资料检索服务（FastAPI），
+  支持关键词搜索、分类过滤、文档类型查询，
   并支持自动替换响应文件中的占位符为实际图片引用。
+  内部/外部双访问模式（内部优先，外部兜底），图片自动缓存。
   当用户需要查询投标资料（营业执照、证书、合同、业绩等）、
-  启动资料检索服务、管理索引条目（增删改）、
-  或替换响应文件中的【此处插入XX扫描件】占位符时触发。
-  前置条件：需已通过 bid-material-extraction 完成图片提取和索引建立。
+  启动资料检索服务、或替换响应文件中的【此处插入XX扫描件】占位符时触发。
+  前置条件：需 MaterialHub API 服务已运行，材料已通过 MaterialHub 上传。
 ---
 
 # 投标资料检索服务
 
 ## 前置条件
 
-- `pages/` 目录 + `index.json`：从旧标书PDF提取的图片和索引（由 bid-material-extraction 生成）
-- `data/` 目录 + `data/manifest.json`（可选）：从公司自有响应文件提取的资料图片
+**MaterialHub API 服务**：
 
-启动时自动加载两个数据源，合并为统一的文档列表。搜索和替换对两个来源透明。
+- **内部访问（优先）**：`http://localhost:8201`
+- **外部访问（兜底）**：`http://senseflow.club:3100`
+
+**认证凭据**：通过环境变量配置管理员账户。
+
+**材料数据**：需已通过 MaterialHub Web UI 上传 DOCX 文档并提取材料。
+
+不再需要手动维护 `pages/` 目录和 `index.json` 文件。
 
 ## 依赖
 
-- Python: FastAPI, uvicorn
+- Python: FastAPI, uvicorn, requests
+
+## 环境变量配置
+
+在启动服务前可以设置以下环境变量（可选）：
+
+```bash
+# MaterialHub API 地址（可选，有默认值）
+export MATERIALHUB_INTERNAL_URL=http://localhost:8201
+export MATERIALHUB_EXTERNAL_URL=http://senseflow.club:3100
+
+# MaterialHub 认证（可选，未设置时会提示输入）
+export MATERIALHUB_USERNAME=admin
+export MATERIALHUB_PASSWORD=admin123
+
+# 图片缓存目录（可选，默认 .cache）
+export MATERIALHUB_CACHE_DIR=.cache
+```
+
+**注意**：如果未设置 `MATERIALHUB_USERNAME` 或 `MATERIALHUB_PASSWORD`，
+服务启动时会提示用户输入用户名和密码。
 
 ## 启动服务
 
-核心脚本：`scripts/app.py`
+核心脚本：`scripts/app.py`（依赖 `scripts/materialhub_client.py`）
 
-将 `app.py` 放置在与 `index.json` 和 `pages/` 同级的目录下，启动：
+确保 MaterialHub API 服务已运行，然后启动本服务：
+
+### 方式 1：交互式启动（推荐）
+
+直接启动，服务会提示输入用户名和密码：
 
 ```bash
+cd skills/bid-material-search/scripts
 uvicorn app:app --host 0.0.0.0 --port 9000
 ```
+
+启动时会看到提示：
+
+```
+============================================================
+MaterialHub 认证
+============================================================
+用户名 [默认: admin]: admin
+密码: ********
+============================================================
+```
+
+### 方式 2：环境变量（适合自动化）
+
+预先设置环境变量，跳过交互式输入：
+
+```bash
+# 设置环境变量
+export MATERIALHUB_USERNAME=admin
+export MATERIALHUB_PASSWORD=admin123
+
+# 启动服务
+cd skills/bid-material-search/scripts
+uvicorn app:app --host 0.0.0.0 --port 9000
+```
+
+服务启动后会自动尝试连接 MaterialHub API（内部优先，外部兜底）。
+连接失败会记录警告，但服务仍会启动（返回空结果）。
 
 ## API 端点
 
 | 端点 | 说明 |
 |------|------|
-| `GET /api/search?q=关键词` | 关键词搜索（匹配 type+label+section+tags） |
+| `GET /api/companies` | **列出所有公司**（v2.1新增） |
+| `GET /api/search?q=关键词` | 关键词搜索（匹配 type+label+section+ocr_text） |
+| `GET /api/search?company_id=1` | **按公司ID过滤**（v2.1新增） |
+| `GET /api/search?company_name=公司名` | **按公司名称过滤**（v2.1新增，模糊匹配） |
 | `GET /api/search?category=分类` | 按分类过滤（资质证明/业绩证明/基本文件等） |
 | `GET /api/search?type=类型` | 按文档类型过滤 |
-| `GET /api/search?q=关键词&category=分类` | 组合查询 |
+| `GET /api/search?q=关键词&company_id=1&category=分类` | 组合查询 |
 | `GET /api/documents` | 列出所有文档 |
 | `GET /api/documents/{id}` | 单个文档详情 |
 | `POST /api/replace` | 占位符替换（搜索+复制图片+替换markdown） |
-| `GET /pages/{filename}` | 静态图片文件 |
+| `GET /health` | 服务健康检查 |
 
 返回格式：
 
@@ -52,35 +114,104 @@ uvicorn app:app --host 0.0.0.0 --port 9000
 {
   "results": [
     {
-      "id": "sec_10_1_营业执照",
-      "section": "10.1",
+      "id": "mat_11",
+      "section": "",
       "type": "营业执照",
       "category": "资质证明",
-      "label": "10.1 营业执照",
-      "page_range": [22, 22],
+      "label": "营业执照",
+      "page_range": [],
+      "source": "materialhub",
       "images": [
-        {"filename": "10_1_营业执照.jpeg", "url": "/pages/10_1_营业执照.jpeg"}
-      ]
+        {"filename": "营业执照.png", "url": "/api/materials/11/image"}
+      ],
+      "_material_id": 11
     }
   ]
 }
 ```
 
-## 索引管理
+## 多公司场景（v2.1）
 
-### 新增条目
+当 MaterialHub 中存储多个公司的材料时，需要明确指定查询哪个公司的资料。
 
-直接编辑 `index.json`，在 `documents` 数组中添加新条目，将对应图片放入 `pages/` 目录。重启服务生效。
+### 查询可用公司
 
-### 替换过期资料
+```bash
+curl "http://localhost:9000/api/companies"
+```
 
-1. 将新图片放入 `pages/`，删除旧图片
-2. 更新 `index.json` 中对应条目的 `files` 字段
-3. 重启服务
+**响应示例**：
+```json
+{
+  "companies": [
+    {
+      "id": 1,
+      "name": "珞信通达（北京）科技有限公司",
+      "material_count": 74
+    },
+    {
+      "id": 2,
+      "name": "王春红",
+      "material_count": 2
+    }
+  ]
+}
+```
 
-### 扩展搜索能力
+### 按公司搜索材料
 
-如需增强检索（如模糊匹配、拼音搜索），修改 `app.py` 中的 `_match_keyword` 函数。当前实现为子串包含匹配，对中文关键词已够用。
+**方式1：通过公司ID（精确）**
+
+```bash
+# 查询公司1的营业执照
+curl "http://localhost:9000/api/search?q=营业执照&company_id=1"
+```
+
+**方式2：通过公司名称（模糊匹配）**
+
+```bash
+# 通过名称关键词查询
+curl "http://localhost:9000/api/search?q=营业执照&company_name=琪信通达"
+```
+
+系统会自动模糊匹配公司名称。
+
+**方式3：列出公司所有材料**
+
+```bash
+# 不带关键词，列出公司1的所有材料
+curl "http://localhost:9000/api/search?company_id=1"
+```
+
+**组合过滤示例**：
+
+```bash
+# 查询公司1的所有资质证明
+curl "http://localhost:9000/api/search?company_id=1&category=资质证明"
+
+# 查询公司1的ISO认证
+curl "http://localhost:9000/api/search?q=ISO&company_id=1&category=资质证明"
+```
+
+详见：`COMPANY_FILTER.md`
+
+## 材料管理
+
+### 上传新材料
+
+通过 MaterialHub Web UI 上传 DOCX 文档，系统自动提取图片并创建材料记录。
+
+### 更新材料信息
+
+通过 MaterialHub Web UI 编辑材料元数据（标题、分类、有效期等）。
+
+### 搜索能力
+
+搜索由 MaterialHub API 提供，支持：
+- 全文搜索（OCR 识别文本）
+- 标题/章节关键词匹配
+- 分类过滤
+- 有效期过滤
 
 ## 占位符替换
 
@@ -207,6 +338,61 @@ curl "localhost:9000/api/search?q=合同"
 curl "localhost:9000/api/search?q=ISO"
 ```
 
+## 故障排查
+
+### 连接失败
+
+**症状**：启动日志显示 "MaterialHub API unavailable"
+
+**解决方法**：
+1. 检查 MaterialHub 服务是否运行：
+   ```bash
+   curl http://localhost:8201/health
+   ```
+2. 检查网络连接（如使用外部地址）
+3. 验证环境变量配置是否正确
+
+### 认证失败
+
+**症状**：搜索返回空结果，日志显示 "Login failed"
+
+**解决方法**：
+1. 验证用户名密码：
+   ```bash
+   curl -X POST http://localhost:8201/api/auth/login \
+     -H 'Content-Type: application/json' \
+     -d '{"username":"admin","password":"admin123"}'
+   ```
+2. 检查 MaterialHub 管理员账户是否被禁用
+3. 查看 MaterialHub 服务日志
+
+### 图片下载失败
+
+**症状**：替换操作返回 500 错误 "Failed to download image"
+
+**解决方法**：
+1. 检查 material_id 是否存在
+2. 检查 MaterialHub 图片文件是否损坏
+3. 清空缓存目录后重试：
+   ```bash
+   rm -rf .cache/
+   ```
+
+### 服务健康检查
+
+```bash
+curl http://localhost:9000/health
+```
+
+预期返回：
+```json
+{
+  "status": "healthy",
+  "materialhub_connected": true,
+  "materialhub_url": "http://localhost:8201"
+}
+```
+
 ## 完成状态
 
 替换完成后，输出以下结构化状态摘要：
@@ -216,9 +402,11 @@ curl "localhost:9000/api/search?q=ISO"
 扫描文件数: {N}
 发现占位符: {N}
 ✅成功替换: {N}
-⚠️需人工确认: {N}
-❌无匹配: {N}
+⚠️需人工确认: {N}（MaterialHub 返回多个匹配）
+❌无匹配: {N}（MaterialHub 中未找到）
 复制图片数: {N}
+缓存命中率: {N}%
+MaterialHub 连接: {internal/external/failed}
 输出目录: 响应文件/
 状态: SUCCESS
 --- END ---
