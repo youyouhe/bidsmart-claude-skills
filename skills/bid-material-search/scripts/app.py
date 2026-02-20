@@ -257,7 +257,7 @@ def get_document(doc_id: str):
 
 @app.get("/api/companies")
 def list_companies():
-    """列出所有公司（新增端点）
+    """列出所有公司
 
     Returns:
         公司列表，包含材料统计
@@ -268,6 +268,248 @@ def list_companies():
     companies = materialhub_client.get_companies()
     logger.info(f"Listed {len(companies)} companies")
     return {"companies": companies}
+
+
+@app.get("/api/companies/{company_id}/details")
+def get_company_details(company_id: int):
+    """获取公司详细信息（包含所有材料和提取的数据）
+
+    Args:
+        company_id: 公司ID
+
+    Returns:
+        公司详情，包含：
+        - 公司基本信息（名称、法人、信用代码等）
+        - 所有关联材料
+        - 每个材料的extracted_data（注册资本、成立日期等）
+    """
+    if not materialhub_client or not materialhub_client.token:
+        raise HTTPException(status_code=503, detail="MaterialHub API unavailable")
+
+    details = materialhub_client.get_company_details(company_id)
+    if not details:
+        raise HTTPException(status_code=404, detail=f"Company {company_id} not found")
+
+    logger.info(f"Retrieved details for company {company_id}")
+    return details
+
+
+@app.get("/api/persons")
+def list_persons(company_id: Optional[int] = Query(None, description="按公司ID过滤")):
+    """列出所有人员
+
+    Args:
+        company_id: 可选，按公司过滤
+
+    Returns:
+        人员列表
+    """
+    if not materialhub_client or not materialhub_client.token:
+        raise HTTPException(status_code=503, detail="MaterialHub API unavailable")
+
+    persons = materialhub_client.get_persons(company_id=company_id)
+    logger.info(f"Listed {len(persons)} persons")
+    return {"persons": persons}
+
+
+@app.get("/api/persons/{person_id}/details")
+def get_person_details(person_id: int):
+    """获取人员详细信息（包含所有材料和提取的数据）
+
+    Args:
+        person_id: 人员ID
+
+    Returns:
+        人员详情，包含：
+        - 人员基本信息（姓名、身份证号、学历等）
+        - 所有关联材料（身份证、学历证书、职称证书等）
+        - 每个材料的extracted_data（性别、出生日期、专业等）
+    """
+    if not materialhub_client or not materialhub_client.token:
+        raise HTTPException(status_code=503, detail="MaterialHub API unavailable")
+
+    details = materialhub_client.get_person_details(person_id)
+    if not details:
+        raise HTTPException(status_code=404, detail=f"Person {person_id} not found")
+
+    logger.info(f"Retrieved details for person {person_id}")
+    return details
+
+
+@app.get("/api/materials/{material_id}/details")
+def get_material_details(material_id: int):
+    """获取材料详细信息（包含完整extracted_data）
+
+    Args:
+        material_id: 材料ID
+
+    Returns:
+        材料详情，包含：
+        - 基本信息（标题、类型、文件名等）
+        - OCR识别的文本
+        - extracted_data（根据材料类型提取的结构化数据）
+          - 营业执照：注册资本、成立日期、公司类型等
+          - 身份证：性别、出生日期、民族等
+          - 证书：证书编号、有效期、认证机构等
+    """
+    if not materialhub_client or not materialhub_client.token:
+        raise HTTPException(status_code=503, detail="MaterialHub API unavailable")
+
+    details = materialhub_client.get_material_details(material_id)
+    if not details:
+        raise HTTPException(status_code=404, detail=f"Material {material_id} not found")
+
+    logger.info(f"Retrieved details for material {material_id}")
+    return details
+
+
+@app.get("/api/extract")
+def extract_structured_data(
+    company_id: Optional[int] = Query(None, description="公司ID"),
+    material_types: Optional[str] = Query(None, description="材料类型（逗号分隔，如: license,id_card,iso_cert）"),
+):
+    """批量提取结构化数据（用于标书编写）
+
+    从公司的所有材料中提取关键信息，返回标书编写所需的结构化数据。
+
+    Args:
+        company_id: 公司ID（必需）
+        material_types: 要提取的材料类型（可选）
+
+    Returns:
+        结构化数据，包含：
+        - 公司信息（营业执照）
+        - 法人信息（法人身份证）
+        - ISO证书列表
+        - 人员列表（含社保、学历等）
+        - 合同业绩列表
+
+    Example:
+        GET /api/extract?company_id=1
+        GET /api/extract?company_id=1&material_types=license,iso_cert
+    """
+    if not materialhub_client or not materialhub_client.token:
+        raise HTTPException(status_code=503, detail="MaterialHub API unavailable")
+
+    if not company_id:
+        raise HTTPException(status_code=400, detail="company_id is required")
+
+    # 获取公司详细信息
+    company_details = materialhub_client.get_company_details(company_id)
+    if not company_details:
+        raise HTTPException(status_code=404, detail=f"Company {company_id} not found")
+
+    company_info = company_details["company"]
+    materials = company_details["materials"]
+
+    # 过滤材料类型
+    if material_types:
+        allowed_types = set(material_types.split(","))
+        materials = [m for m in materials if m.get("material_type") in allowed_types]
+
+    # 提取数据
+    result = {
+        "company": {
+            "id": company_info["id"],
+            "name": company_info["name"],
+            "legal_person": company_info.get("legal_person"),
+            "credit_code": company_info.get("credit_code"),
+            "address": company_info.get("address"),
+        },
+        "license": None,  # 营业执照
+        "certificates": [],  # ISO证书等
+        "persons": [],  # 人员信息
+        "contracts": [],  # 合同业绩
+    }
+
+    # 按材料类型分类
+    for material in materials:
+        mat_type = material.get("material_type")
+        extracted = material.get("extracted_data", {})
+        if extracted:
+            extracted_data = extracted.get("extracted_data", {})
+        else:
+            extracted_data = {}
+
+        # 营业执照
+        if mat_type == "license" and not result["license"]:
+            result["license"] = {
+                "material_id": material["id"],
+                "title": material["title"],
+                "registered_capital": extracted_data.get("registered_capital"),
+                "establishment_date": extracted_data.get("establishment_date"),
+                "company_type": extracted_data.get("company_type"),
+                "business_scope": extracted_data.get("business_scope"),
+                "ocr_text": material.get("ocr_text"),  # 原始OCR文本
+            }
+
+        # 证书类
+        elif mat_type in ["iso_cert", "qualification", "certificate"]:
+            cert = {
+                "material_id": material["id"],
+                "title": material["title"],
+                "cert_type": mat_type,
+                "cert_number": extracted_data.get("cert_number"),
+                "expiry_date": material.get("expiry_date") or extracted_data.get("expiry_date"),
+                "issue_authority": extracted_data.get("issue_authority"),
+                "scope": extracted_data.get("scope"),
+                "ocr_text": material.get("ocr_text"),  # 原始OCR文本（如extracted_data为空时使用）
+            }
+            result["certificates"].append(cert)
+
+        # 合同业绩
+        elif mat_type in ["contract", "performance"]:
+            contract = {
+                "material_id": material["id"],
+                "title": material["title"],
+                "contract_type": mat_type,
+                "contract_amount": extracted_data.get("contract_amount"),
+                "contract_date": extracted_data.get("contract_date"),
+                "client": extracted_data.get("client"),
+                "ocr_text": material.get("ocr_text"),
+            }
+            result["contracts"].append(contract)
+
+    # 获取人员信息
+    persons_list = materialhub_client.get_persons(company_id=company_id)
+    for person in persons_list:
+        person_details = materialhub_client.get_person_details(person["id"])
+        if not person_details:
+            continue
+
+        person_data = {
+            "person_id": person["id"],
+            "name": person["name"],
+            "id_number": person.get("id_number"),
+            "education": person.get("education"),
+            "position": person.get("position"),
+            "materials": {},  # 按材料类型分类
+        }
+
+        # 提取人员相关材料
+        for material in person_details.get("materials", []):
+            mat_type = material.get("material_type")
+            extracted = material.get("extracted_data", {})
+            if extracted:
+                extracted_data = extracted.get("extracted_data", {})
+            else:
+                extracted_data = {}
+
+            mat_info = {
+                "material_id": material["id"],
+                "title": material["title"],
+                "extracted_data": extracted_data,
+                "ocr_text": material.get("ocr_text"),
+            }
+
+            if mat_type not in person_data["materials"]:
+                person_data["materials"][mat_type] = []
+            person_data["materials"][mat_type].append(mat_info)
+
+        result["persons"].append(person_data)
+
+    logger.info(f"Extracted structured data for company {company_id}: {len(materials)} materials, {len(result['persons'])} persons")
+    return result
 
 
 class ReplaceRequest(BaseModel):

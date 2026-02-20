@@ -189,6 +189,75 @@ class MaterialHubClient:
         logger.warning(f"Get company materials failed: {resp.status_code if resp else 'no response'}")
         return []
 
+    def get_company_details(self, company_id: int) -> Optional[dict]:
+        """获取公司详细信息（包含材料）
+
+        Args:
+            company_id: 公司 ID
+
+        Returns:
+            公司详情，包含关联的材料列表和提取的数据
+        """
+        resp = self._request("GET", f"/api/companies/{company_id}/materials")
+        if resp and resp.status_code == 200:
+            return resp.json()
+
+        logger.warning(f"Get company details failed: {resp.status_code if resp else 'no response'}")
+        return None
+
+    def get_persons(self, company_id: Optional[int] = None) -> list[dict]:
+        """获取人员列表
+
+        Args:
+            company_id: 可选，按公司过滤
+
+        Returns:
+            人员列表
+        """
+        params = {}
+        if company_id:
+            params["company_id"] = company_id
+
+        resp = self._request("GET", "/api/persons", params=params)
+        if resp and resp.status_code == 200:
+            data = resp.json()
+            return data.get("persons", [])
+
+        logger.warning(f"Get persons failed: {resp.status_code if resp else 'no response'}")
+        return []
+
+    def get_person_details(self, person_id: int) -> Optional[dict]:
+        """获取人员详细信息（包含材料）
+
+        Args:
+            person_id: 人员 ID
+
+        Returns:
+            人员详情，包含关联的材料列表和提取的数据
+        """
+        resp = self._request("GET", f"/api/persons/{person_id}/materials")
+        if resp and resp.status_code == 200:
+            return resp.json()
+
+        logger.warning(f"Get person details failed: {resp.status_code if resp else 'no response'}")
+        return None
+
+    def get_material_details(self, material_id: int) -> Optional[dict]:
+        """获取材料详细信息（包含extracted_data）
+
+        Args:
+            material_id: 材料 ID
+
+        Returns:
+            材料详情，包含完整的extracted_data
+        """
+        resp = self._request("GET", f"/api/materials/{material_id}")
+        if resp and resp.status_code == 200:
+            return resp.json()
+
+        logger.warning(f"Get material details failed: {resp.status_code if resp else 'no response'}")
+        return None
+
     def search_materials(
         self,
         q: Optional[str] = None,

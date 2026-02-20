@@ -94,18 +94,34 @@ uvicorn app:app --host 0.0.0.0 --port 9000
 
 ## API 端点
 
+### 图片检索与替换
+
 | 端点 | 说明 |
 |------|------|
-| `GET /api/companies` | **列出所有公司**（v2.1新增） |
 | `GET /api/search?q=关键词` | 关键词搜索（匹配 type+label+section+ocr_text） |
-| `GET /api/search?company_id=1` | **按公司ID过滤**（v2.1新增） |
-| `GET /api/search?company_name=公司名` | **按公司名称过滤**（v2.1新增，模糊匹配） |
+| `GET /api/search?company_id=1` | 按公司ID过滤（v2.1） |
+| `GET /api/search?company_name=公司名` | 按公司名称过滤（v2.1，模糊匹配） |
 | `GET /api/search?category=分类` | 按分类过滤（资质证明/业绩证明/基本文件等） |
 | `GET /api/search?type=类型` | 按文档类型过滤 |
-| `GET /api/search?q=关键词&company_id=1&category=分类` | 组合查询 |
 | `GET /api/documents` | 列出所有文档 |
 | `GET /api/documents/{id}` | 单个文档详情 |
 | `POST /api/replace` | 占位符替换（搜索+复制图片+替换markdown） |
+
+### 结构化数据提取（v2.2）⭐
+
+| 端点 | 说明 |
+|------|------|
+| `GET /api/companies` | 列出所有公司 |
+| `GET /api/companies/{id}/details` | 获取公司详情（包含所有材料和extracted_data） |
+| `GET /api/persons?company_id=1` | 列出人员（可按公司过滤） |
+| `GET /api/persons/{id}/details` | 获取人员详情（包含身份证、学历证书等） |
+| `GET /api/materials/{id}/details` | 获取材料详情（包含完整extracted_data和ocr_text） |
+| `GET /api/extract?company_id=1` | **批量提取结构化数据**（标书编写核心功能） |
+
+### 其他
+
+| 端点 | 说明 |
+|------|------|
 | `GET /health` | 服务健康检查 |
 
 返回格式：
@@ -194,6 +210,118 @@ curl "http://localhost:9000/api/search?q=ISO&company_id=1&category=资质证明"
 ```
 
 详见：`COMPANY_FILTER.md`
+
+## 结构化数据提取（v2.2）⭐
+
+MaterialHub 通过 OCR + LLM 从材料图片中提取了结构化数据，存储在 `extracted_data` 字段中。
+
+### 用途
+
+为标书编写提供结构化信息，无需手动输入：
+
+- **营业执照**：注册资本、成立日期、公司类型、经营范围
+- **身份证**：性别、出生日期、民族、住址
+- **ISO证书**：证书编号、有效期、认证机构、认证范围
+- **学历证书**：学历、专业、毕业时间
+- **合同业绩**：合同金额、合同日期、客户名称
+
+### 核心端点：批量提取
+
+`GET /api/extract?company_id=1`
+
+一次性获取公司的所有结构化数据：
+
+**响应结构**：
+
+```json
+{
+  "company": {
+    "name": "珞信通达（北京）科技有限公司",
+    "legal_person": "王春红",
+    "credit_code": "91110111674272168B"
+  },
+  "license": {
+    "registered_capital": "2001万元",
+    "establishment_date": "2008-04-14",
+    "company_type": "有限责任公司(自然人投资或控股)",
+    "ocr_text": "原始OCR文本（备用）"
+  },
+  "certificates": [
+    {
+      "title": "ISO27001信息安全管理体系认证",
+      "cert_number": "016ZB25I30045R1S",
+      "expiry_date": "2028-02-27",
+      "issue_authority": "BCC Inc."
+    }
+  ],
+  "persons": [
+    {
+      "name": "周杨",
+      "id_number": "411023200112043047",
+      "materials": {
+        "id_card": [{
+          "extracted_data": {
+            "gender": "女",
+            "birth_date": "2001-12-04",
+            "nation": "汉"
+          }
+        }]
+      }
+    }
+  ]
+}
+```
+
+### 使用示例
+
+```bash
+# 获取公司1的所有结构化数据
+curl "http://localhost:9000/api/extract?company_id=1"
+
+# 只获取营业执照和ISO证书
+curl "http://localhost:9000/api/extract?company_id=1&material_types=license,iso_cert"
+```
+
+### Python示例
+
+```python
+import requests
+
+# 获取数据
+response = requests.get(
+    "http://localhost:9000/api/extract",
+    params={"company_id": 1}
+)
+data = response.json()
+
+# 提取需要的字段
+print(f"公司名称: {data['company']['name']}")
+print(f"注册资本: {data['license']['registered_capital']}")
+print(f"成立日期: {data['license']['establishment_date']}")
+
+# ISO证书信息
+for cert in data['certificates']:
+    if 'ISO' in cert['title']:
+        print(f"证书名称: {cert['title']}")
+        print(f"证书编号: {cert['cert_number']}")
+        print(f"有效期: {cert['expiry_date']}")
+
+# 法人信息
+legal_person = data['company']['legal_person']
+for person in data['persons']:
+    if person['name'] == legal_person:
+        id_card = person['materials']['id_card'][0]['extracted_data']
+        print(f"法人性别: {id_card['gender']}")
+        print(f"法人出生日期: {id_card['birth_date']}")
+        break
+```
+
+### 数据完整性
+
+- ✅ **extracted_data存在**：直接使用提取的字段
+- ⚠️ **extracted_data为null**：使用 `ocr_text` 字段（包含原始OCR文本）
+
+详见：`DATA_EXTRACTION.md`
 
 ## 材料管理
 
