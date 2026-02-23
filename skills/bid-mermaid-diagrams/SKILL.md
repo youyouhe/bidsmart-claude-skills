@@ -86,6 +86,24 @@ bash scripts/render.sh input.mmd output.png 1400 2
 
 渲染输出的 PNG 保存到目标 markdown 文件的同目录。
 
+**⭐ 自动水印功能**：
+`render.sh` 脚本在渲染完成后会自动尝试添加项目名称水印：
+- 从当前目录的 `分析报告.md` 中自动提取项目名称
+- 在图片右下角添加半透明灰色水印
+- 如果未找到项目名称，跳过水印功能（不影响渲染）
+
+水印参数：
+- 位置：右下角
+- 透明度：50%
+- 字体大小：20px
+- 边距：15px
+
+**手动添加水印**：
+```bash
+# 使用 watermark.py 手动添加水印
+python3 scripts/watermark.py --auto-project-name diagram.png -o diagram.png
+```
+
 ### 5. 替换占位符
 
 将 markdown 中的占位符行替换为图片引用：

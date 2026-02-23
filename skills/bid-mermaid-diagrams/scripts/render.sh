@@ -39,6 +39,18 @@ npx --yes @mermaid-js/mermaid-cli \
 
 if [ -f "$OUTPUT" ]; then
     echo "OK: $OUTPUT"
+
+    # 添加水印（如果能找到项目名称）
+    WATERMARK_SCRIPT="$SCRIPT_DIR/watermark.py"
+    if [ -f "$WATERMARK_SCRIPT" ]; then
+        if python3 "$WATERMARK_SCRIPT" --auto-project-name "$OUTPUT" -o "$OUTPUT" 2>&1 | grep -q "Watermarked"; then
+            echo "Added watermark to $OUTPUT"
+        else
+            echo "Warning: Failed to add watermark (project name not found or error occurred)"
+        fi
+    else
+        echo "Warning: Watermark script not found at $WATERMARK_SCRIPT"
+    fi
 else
     echo "Error: Failed to render $INPUT"
     exit 1

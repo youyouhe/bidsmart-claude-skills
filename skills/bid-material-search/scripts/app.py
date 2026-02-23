@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from materialhub_client import MaterialHubClient
+from watermark import add_watermark, get_project_name_from_analysis
 
 # 设置日志
 logging.basicConfig(
@@ -44,8 +45,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 全局客户端
+# 全局客户端和配置
 materialhub_client: Optional[MaterialHubClient] = None
+project_name: str = ""  # 项目名称（用于水印）
 
 
 def _get_credentials():
@@ -90,8 +92,8 @@ def _get_credentials():
 
 @app.on_event("startup")
 def initialize():
-    """初始化 MaterialHub 客户端"""
-    global materialhub_client
+    """初始化 MaterialHub 客户端和检测项目名称"""
+    global materialhub_client, project_name
 
     internal_url = os.getenv("MATERIALHUB_INTERNAL_URL", "http://localhost:8201")
     external_url = os.getenv("MATERIALHUB_EXTERNAL_URL", "http://senseflow.club:3100")
@@ -113,6 +115,13 @@ def initialize():
         logger.info(f"Connected to MaterialHub: {materialhub_client.base_url}")
     else:
         logger.warning("MaterialHub API unavailable - service will return empty results")
+
+    # 检测项目名称（用于水印）
+    project_name = get_project_name_from_analysis()
+    if project_name:
+        logger.info(f"Detected project name for watermark: {project_name}")
+    else:
+        logger.warning("No project name found in 分析报告.md - watermark will be skipped")
 
 
 def _transform_material(material: dict) -> dict:
@@ -580,6 +589,25 @@ def replace_placeholder(req: ReplaceRequest):
     try:
         image_path.write_bytes(image_bytes)
         logger.info(f"Saved image to {image_path}")
+
+        # 添加水印（如果有项目名称）
+        if project_name:
+            try:
+                add_watermark(
+                    image_path,
+                    output_path=image_path,  # 覆盖原图
+                    watermark_text=project_name,
+                    position="bottom_right",
+                    opacity=128,
+                    font_size=20,
+                    color=(128, 128, 128),
+                    margin=15,
+                )
+                logger.info(f"Added watermark '{project_name}' to {image_path}")
+            except Exception as e:
+                logger.warning(f"Failed to add watermark: {e}")
+                # 不影响主流程，继续执行
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save image: {e}")
 
