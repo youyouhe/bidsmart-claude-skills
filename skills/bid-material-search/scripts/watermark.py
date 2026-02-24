@@ -65,34 +65,37 @@ def add_watermark(
     draw = ImageDraw.Draw(watermark_layer)
 
     # 尝试加载中文字体
+    # 格式：(字体路径, 字体索引)
+    # TTC文件包含多个字体，需要指定索引
+    # index=3 通常是简体中文 (SC)
     font = None
-    font_paths = [
+    font_configs = [
         # Linux 常见中文字体路径
-        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", 0),
+        ("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", 0),
+        ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 3),  # index=3 是简体中文
         # macOS 中文字体
-        "/System/Library/Fonts/PingFang.ttc",
-        "/Library/Fonts/Arial Unicode.ttf",
+        ("/System/Library/Fonts/PingFang.ttc", 0),
+        ("/Library/Fonts/Arial Unicode.ttf", 0),
         # Windows 中文字体
-        "C:\\Windows\\Fonts\\msyh.ttc",  # 微软雅黑
-        "C:\\Windows\\Fonts\\simhei.ttf",  # 黑体
+        ("C:\\Windows\\Fonts\\msyh.ttc", 0),  # 微软雅黑
+        ("C:\\Windows\\Fonts\\simhei.ttf", 0),  # 黑体
     ]
 
-    for font_path in font_paths:
+    for font_path, font_index in font_configs:
         if os.path.exists(font_path):
             try:
-                font = ImageFont.truetype(font_path, font_size)
-                logger.debug(f"Loaded font: {font_path}")
+                font = ImageFont.truetype(font_path, font_size, index=font_index)
+                logger.debug(f"Loaded font: {font_path} (index={font_index})")
                 break
             except Exception as e:
-                logger.debug(f"Failed to load font {font_path}: {e}")
+                logger.debug(f"Failed to load font {font_path} (index={font_index}): {e}")
                 continue
 
     if font is None:
         # 使用默认字体
         font = ImageFont.load_default()
-        logger.warning("Using default font (may not support Chinese)")
+        logger.warning("Using default font (may not support Chinese and numbers)")
 
     # 获取文字尺寸
     try:
