@@ -31,6 +31,8 @@ def add_watermark_to_docx(
     font_size: int = 20,
     color: tuple = (128, 128, 128),
     margin: int = 15,
+    rotation: int = 0,
+    tile: bool = False,
 ) -> str:
     """为Word文档中的所有图片添加水印
 
@@ -42,6 +44,8 @@ def add_watermark_to_docx(
         opacity: 透明度 (0-255)
         font_size: 字体大小
         color: 水印颜色 (R, G, B)
+        rotation: 旋转角度（-45=斜向）
+        tile: 是否平铺贯穿整个图片
         margin: 水印边距
 
     Returns:
@@ -110,6 +114,8 @@ def add_watermark_to_docx(
                     font_size=font_size,
                     color=color,
                     margin=margin,
+                    rotation=rotation,
+                    tile=tile,
                 )
 
                 # 读取处理后的图片
@@ -198,9 +204,9 @@ if __name__ == "__main__":
     parser.add_argument("input", help="Input Word document or directory")
     parser.add_argument("-o", "--output", help="Output document or directory")
     parser.add_argument("-t", "--text", help="Watermark text")
-    parser.add_argument("-p", "--position", default="bottom_right",
+    parser.add_argument("-p", "--position", default="center",
                         choices=["bottom_right", "bottom_center", "bottom_left",
-                                "top_right", "top_center", "top_left"],
+                                "top_right", "top_center", "top_left", "center"],
                         help="Watermark position")
     parser.add_argument("--opacity", type=int, default=128,
                         help="Watermark opacity (0-255)")
@@ -210,6 +216,10 @@ if __name__ == "__main__":
                         help="Watermark color (R,G,B)")
     parser.add_argument("--margin", type=int, default=15,
                         help="Margin from edge")
+    parser.add_argument("--rotation", type=int, default=-45,
+                        help="Rotation angle in degrees (e.g., -45 for diagonal)")
+    parser.add_argument("--tile", action="store_true",
+                        help="Tile watermark across entire image")
     parser.add_argument("--auto-project-name", action="store_true",
                         help="Auto-detect project name from 分析报告.md")
     parser.add_argument("--batch", action="store_true",
@@ -252,6 +262,8 @@ if __name__ == "__main__":
             font_size=args.font_size,
             color=color,
             margin=args.margin,
+            rotation=args.rotation,
+            tile=args.tile,
         )
         print(f"Processed {len(processed)} Word documents")
     else:
@@ -265,5 +277,7 @@ if __name__ == "__main__":
             font_size=args.font_size,
             color=color,
             margin=args.margin,
+            rotation=args.rotation,
+            tile=args.tile,
         )
         print(f"Watermarked document saved to: {result}")

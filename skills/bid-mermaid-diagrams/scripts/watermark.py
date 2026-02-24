@@ -22,6 +22,8 @@ def add_watermark(
     font_size: int = 24,
     color: tuple = (128, 128, 128),
     margin: int = 20,
+    rotation: int = 0,
+    tile: bool = False,
 ) -> str:
     """为图片添加水印
 
@@ -29,11 +31,13 @@ def add_watermark(
         image_path: 输入图片路径
         output_path: 输出图片路径（如果为 None，则覆盖原图）
         watermark_text: 水印文字
-        position: 水印位置 (bottom_right, bottom_center, bottom_left, top_right, top_center, top_left)
+        position: 水印位置 (bottom_right, bottom_center, bottom_left, top_right, top_center, top_left, center)
         opacity: 透明度 (0-255，0为完全透明，255为完全不透明)
         font_size: 字体大小
         color: 水印颜色 (R, G, B)
         margin: 水印边距（像素）
+        rotation: 旋转角度（逆时针，0=水平，-45=右下到左上斜向）
+        tile: 是否平铺多个水印贯穿整个图片
 
     Returns:
         输出图片路径
@@ -64,78 +68,206 @@ def add_watermark(
     watermark_layer = Image.new('RGBA', img.size, (255, 255, 255, 0))
     draw = ImageDraw.Draw(watermark_layer)
 
-    # 尝试加载中文字体
-    # 格式：(字体路径, 字体索引)
-    # TTC文件包含多个字体，需要指定索引
-    # index=3 通常是简体中文 (SC)
-    font = None
-    font_configs = [
-        # Linux 常见中文字体路径
-        ("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc", 0),
-        ("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", 0),
-        ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 3),  # index=3 是简体中文
-        # macOS 中文字体
-        ("/System/Library/Fonts/PingFang.ttc", 0),
-        ("/Library/Fonts/Arial Unicode.ttf", 0),
-        # Windows 中文字体
-        ("C:\\Windows\\Fonts\\msyh.ttc", 0),  # 微软雅黑
-        ("C:\\Windows\\Fonts\\simhei.ttf", 0),  # 黑体
+    # 使用混合字体方案：中文用CJK字体，数字/ASCII用西文字体
+    # 这样可以避免CJK字体对ASCII字符支持不完整的问题
+
+    # 加载中文字体
+    cn_font = None
+    cn_font_paths = [
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "C:\\Windows\\Fonts\\simhei.ttf",
     ]
 
-    for font_path, font_index in font_configs:
+    for font_path in cn_font_paths:
         if os.path.exists(font_path):
             try:
-                font = ImageFont.truetype(font_path, font_size, index=font_index)
-                logger.debug(f"Loaded font: {font_path} (index={font_index})")
+                if font_path.endswith('.ttc'):
+                    cn_font = ImageFont.truetype(font_path, font_size, index=2)
+                else:
+                    cn_font = ImageFont.truetype(font_path, font_size)
+                logger.debug(f"Loaded Chinese font: {font_path}")
                 break
             except Exception as e:
-                logger.debug(f"Failed to load font {font_path} (index={font_index}): {e}")
+                logger.debug(f"Failed to load Chinese font {font_path}: {e}")
                 continue
 
-    if font is None:
-        # 使用默认字体
-        font = ImageFont.load_default()
-        logger.warning("Using default font (may not support Chinese and numbers)")
+    # 加载西文/数字字体
+    en_font = None
+    en_font_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "C:\\Windows\\Fonts\\arial.ttf",
+    ]
 
-    # 获取文字尺寸
-    try:
-        # PIL 10.0.0+ 使用 textbbox
-        bbox = draw.textbbox((0, 0), watermark_text, font=font)
-        text_width = bbox[2] - bbox[0]
-        text_height = bbox[3] - bbox[1]
-    except AttributeError:
-        # 旧版本 PIL 使用 textsize
-        text_width, text_height = draw.textsize(watermark_text, font=font)
+    for font_path in en_font_paths:
+        if os.path.exists(font_path):
+            try:
+                en_font = ImageFont.truetype(font_path, font_size)
+                logger.debug(f"Loaded English font: {font_path}")
+                break
+            except Exception as e:
+                logger.debug(f"Failed to load English font {font_path}: {e}")
+                continue
 
-    # 计算水印位置
+    # 如果无法加载字体，使用默认字体
+    if cn_font is None:
+        cn_font = ImageFont.load_default()
+        logger.warning("Using default font for Chinese")
+    if en_font is None:
+        en_font = ImageFont.load_default()
+        logger.warning("Using default font for English")
+
+    # 将文本分段：中文字符用cn_font，ASCII字符用en_font
+    import re
+    segments = []
+    current_segment = ""
+    current_type = None
+
+    for char in watermark_text:
+        # 判断字符类型：ASCII (包括数字) 或 非ASCII (中文等)
+        is_ascii = ord(char) < 128
+
+        if current_type is None:
+            current_type = 'ascii' if is_ascii else 'chinese'
+            current_segment = char
+        elif (is_ascii and current_type == 'ascii') or (not is_ascii and current_type == 'chinese'):
+            current_segment += char
+        else:
+            segments.append((current_type, current_segment))
+            current_type = 'ascii' if is_ascii else 'chinese'
+            current_segment = char
+
+    if current_segment:
+        segments.append((current_type, current_segment))
+
+    # 计算总宽度
+    total_width = 0
+    max_height = 0
+    for seg_type, seg_text in segments:
+        font = en_font if seg_type == 'ascii' else cn_font
+        try:
+            bbox = draw.textbbox((0, 0), seg_text, font=font)
+            seg_width = bbox[2] - bbox[0]
+            seg_height = bbox[3] - bbox[1]
+        except AttributeError:
+            seg_width, seg_height = draw.textsize(seg_text, font=font)
+        total_width += seg_width
+        max_height = max(max_height, seg_height)
+
+    # 计算起始位置
     img_width, img_height = img.size
-
-    if position == "bottom_right":
-        x = img_width - text_width - margin
-        y = img_height - text_height - margin
-    elif position == "bottom_center":
-        x = (img_width - text_width) // 2
-        y = img_height - text_height - margin
-    elif position == "bottom_left":
-        x = margin
-        y = img_height - text_height - margin
-    elif position == "top_right":
-        x = img_width - text_width - margin
-        y = margin
-    elif position == "top_center":
-        x = (img_width - text_width) // 2
-        y = margin
-    elif position == "top_left":
-        x = margin
-        y = margin
-    else:
-        # 默认右下角
-        x = img_width - text_width - margin
-        y = img_height - text_height - margin
-
-    # 绘制水印（带透明度）
     text_color = (*color, opacity)
-    draw.text((x, y), watermark_text, font=font, fill=text_color)
+
+    # 如果需要旋转或平铺，使用特殊绘制逻辑
+    if rotation != 0 or tile:
+        # 创建文本图层（刚好容纳文本，留一些padding）
+        padding = 50
+        text_layer_w = int(total_width + padding * 2)
+        text_layer_h = int(max_height + padding * 2)
+        text_layer = Image.new('RGBA', (text_layer_w, text_layer_h), (255, 255, 255, 0))
+        text_draw = ImageDraw.Draw(text_layer)
+
+        # 在文本图层中心绘制水印
+        text_x = padding
+        text_y = padding
+        current_x = text_x
+
+        for seg_type, seg_text in segments:
+            font = en_font if seg_type == 'ascii' else cn_font
+            text_draw.text((current_x, text_y), seg_text, font=font, fill=text_color)
+            try:
+                bbox = text_draw.textbbox((current_x, text_y), seg_text, font=font)
+                current_x = bbox[2]
+            except AttributeError:
+                seg_width, _ = text_draw.textsize(seg_text, font=font)
+                current_x += seg_width
+
+        # 旋转文本图层
+        if rotation != 0:
+            text_layer = text_layer.rotate(rotation, expand=True, resample=Image.BICUBIC)
+
+        # 平铺或单个水印
+        if tile:
+            # 计算需要平铺的行数和列数
+            text_w, text_h = text_layer.size
+            # 使用原始文本大小作为间距基准
+            spacing_x = int(total_width * 1.5)
+            spacing_y = int(max_height * 2)
+
+            for y_offset in range(-text_h, img_height + text_h, spacing_y):
+                for x_offset in range(-text_w, img_width + text_w, spacing_x):
+                    watermark_layer.paste(text_layer, (x_offset, y_offset), text_layer)
+        else:
+            # 单个水印，根据position定位
+            text_w, text_h = text_layer.size
+            if position == "center":
+                paste_x = (img_width - text_w) // 2
+                paste_y = (img_height - text_h) // 2
+            elif position == "bottom_right":
+                paste_x = img_width - text_w - margin
+                paste_y = img_height - text_h - margin
+            elif position == "bottom_center":
+                paste_x = (img_width - text_w) // 2
+                paste_y = img_height - text_h - margin
+            elif position == "bottom_left":
+                paste_x = margin
+                paste_y = img_height - text_h - margin
+            elif position == "top_right":
+                paste_x = img_width - text_w - margin
+                paste_y = margin
+            elif position == "top_center":
+                paste_x = (img_width - text_w) // 2
+                paste_y = margin
+            elif position == "top_left":
+                paste_x = margin
+                paste_y = margin
+            else:
+                paste_x = (img_width - text_w) // 2
+                paste_y = (img_height - text_h) // 2
+
+            watermark_layer.paste(text_layer, (paste_x, paste_y), text_layer)
+    else:
+        # 原有的非旋转逻辑
+        if position == "bottom_right":
+            x = img_width - total_width - margin
+            y = img_height - max_height - margin
+        elif position == "bottom_center":
+            x = (img_width - total_width) // 2
+            y = img_height - max_height - margin
+        elif position == "bottom_left":
+            x = margin
+            y = img_height - max_height - margin
+        elif position == "top_right":
+            x = img_width - total_width - margin
+            y = margin
+        elif position == "top_center":
+            x = (img_width - total_width) // 2
+            y = margin
+        elif position == "top_left":
+            x = margin
+            y = margin
+        elif position == "center":
+            x = (img_width - total_width) // 2
+            y = (img_height - max_height) // 2
+        else:
+            x = img_width - total_width - margin
+            y = img_height - max_height - margin
+
+        # 分段绘制水印
+        current_x = x
+        for seg_type, seg_text in segments:
+            font = en_font if seg_type == 'ascii' else cn_font
+            draw.text((current_x, y), seg_text, font=font, fill=text_color)
+            try:
+                bbox = draw.textbbox((current_x, y), seg_text, font=font)
+                current_x = bbox[2]
+            except AttributeError:
+                seg_width, _ = draw.textsize(seg_text, font=font)
+                current_x += seg_width
 
     # 合并图层
     watermarked = Image.alpha_composite(img, watermark_layer)
@@ -263,9 +395,9 @@ if __name__ == "__main__":
     parser.add_argument("input", help="Input image or directory")
     parser.add_argument("-o", "--output", help="Output image or directory")
     parser.add_argument("-t", "--text", help="Watermark text")
-    parser.add_argument("-p", "--position", default="bottom_right",
+    parser.add_argument("-p", "--position", default="center",
                         choices=["bottom_right", "bottom_center", "bottom_left",
-                                "top_right", "top_center", "top_left"],
+                                "top_right", "top_center", "top_left", "center"],
                         help="Watermark position")
     parser.add_argument("--opacity", type=int, default=128,
                         help="Watermark opacity (0-255)")
@@ -275,6 +407,10 @@ if __name__ == "__main__":
                         help="Watermark color (R,G,B)")
     parser.add_argument("--margin", type=int, default=20,
                         help="Margin from edge")
+    parser.add_argument("--rotation", type=int, default=0,
+                        help="Rotation angle in degrees (e.g., -45 for diagonal)")
+    parser.add_argument("--tile", action="store_true",
+                        help="Tile watermark across entire image")
     parser.add_argument("--auto-project-name", action="store_true",
                         help="Auto-detect project name from 分析报告.md")
     parser.add_argument("--batch", action="store_true",
@@ -323,6 +459,8 @@ if __name__ == "__main__":
             font_size=args.font_size,
             color=color,
             margin=args.margin,
+            rotation=args.rotation,
+            tile=args.tile,
         )
         print(f"Processed {len(processed)} images")
     else:
@@ -336,5 +474,7 @@ if __name__ == "__main__":
             font_size=args.font_size,
             color=color,
             margin=args.margin,
+            rotation=args.rotation,
+            tile=args.tile,
         )
         print(f"Watermarked image saved to: {result}")
