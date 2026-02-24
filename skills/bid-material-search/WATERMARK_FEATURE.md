@@ -13,6 +13,7 @@
 
 1. **bid-material-search** - 从 MaterialHub 下载的材料图片（营业执照、证书、业绩等）
 2. **bid-mermaid-diagrams** - 生成的 Mermaid 图表（架构图、流程图等）
+3. **Word文档批量处理** - 为已有Word文档中的所有图片添加水印（⭐ v2.3.2 新增）
 
 ---
 
@@ -259,6 +260,47 @@ def add_watermark(image_path, output_path, watermark_text, ...):
   - JPG/JPEG → JPG（转换为 RGB）
   - 其他 → PNG
 
+### Word文档处理实现 ⭐ v2.3.2
+
+**watermark_docx.py** 提供Word文档批量水印功能：
+
+```python
+from watermark_docx import add_watermark_to_docx
+
+# 为Word文档中的所有图片添加水印
+add_watermark_to_docx(
+    docx_path="响应文件/技术方案.docx",
+    output_path="响应文件/技术方案_水印版.docx",
+    watermark_text="某市智慧城市大数据平台采购项目",
+    position="bottom_right",
+    opacity=128,
+    font_size=20,
+)
+```
+
+**核心实现**：
+
+1. **打开Word文档**：使用 `python-docx` 库
+2. **遍历图片关系**：通过 `doc.part.rels` 获取所有图片
+3. **提取图片数据**：从 `image_part.blob` 获取字节数据
+4. **添加水印**：
+   - 将图片字节转换为PIL Image
+   - 保存到临时文件
+   - 调用 `add_watermark()` 添加水印
+   - 读取处理后的图片
+5. **替换图片数据**：更新 `image_part._blob`
+6. **保存文档**：`doc.save(output_path)`
+
+**依赖库**：
+```bash
+pip install python-docx Pillow
+```
+
+**处理统计**：
+- 自动跳过非PNG/JPG格式的图片
+- 记录处理成功和跳过的图片数量
+- 临时文件自动清理
+
 ---
 
 ## 使用示例
@@ -294,10 +336,42 @@ bash scripts/render.sh diagram.mmd diagram.png
 # > Added watermark to diagram.png
 ```
 
-### 场景3：手动批量处理
+### 场景3：Word文档批量处理 ⭐ v2.3.2
 
 ```bash
-# 为目录下所有图片添加水印
+# 为Word文档中的所有图片添加水印（自动检测项目名称）
+python3 scripts/watermark_docx.py 响应文件/技术方案.docx \
+    -o 响应文件/技术方案_水印版.docx \
+    --auto-project-name
+
+# 输出：
+# > Processing Word document: 响应文件/技术方案.docx
+# > Added watermark to /tmp/temp_image_rId9.png
+# > Added watermark to /tmp/temp_image_rId10.png
+# > Processed 2 images, skipped 0 images
+# > Saved watermarked document to: 响应文件/技术方案_水印版.docx
+
+# 批量处理目录下所有Word文档
+python3 scripts/watermark_docx.py --batch 响应文件/ \
+    --auto-project-name
+
+# 覆盖原文件（不创建备份）
+python3 scripts/watermark_docx.py 技术方案.docx \
+    --auto-project-name
+```
+
+**工作原理**：
+1. 打开Word文档，提取所有嵌入的图片
+2. 逐个为图片添加水印（使用临时文件）
+3. 将处理后的图片替换回Word文档
+4. 保存新文档
+
+**支持的图片格式**：PNG、JPG/JPEG（其他格式会跳过）
+
+### 场景4：手动批量处理PNG文件
+
+```bash
+# 为目录下所有PNG图片添加水印
 python3 scripts/watermark.py --batch 响应文件/ \
     --auto-project-name \
     --position bottom_right \

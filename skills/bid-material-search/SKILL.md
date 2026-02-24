@@ -114,12 +114,25 @@ uvicorn app:app --host 0.0.0.0 --port 9000
 
 **手动测试水印**：
 ```bash
-# 自动从 分析报告.md 提取项目名称
+# 单个PNG图片
 python3 scripts/watermark.py --auto-project-name input.png -o output.png
 
 # 手动指定水印文字
 python3 scripts/watermark.py input.png -o output.png -t "某市采购项目" --position bottom_right
+
+# Word文档批量处理 ⭐ v2.3.2
+python3 scripts/watermark_docx.py 响应文件/技术方案.docx -o 响应文件/技术方案_水印版.docx --auto-project-name
+
+# 批量处理目录下所有Word文档
+python3 scripts/watermark_docx.py --batch 响应文件/ --auto-project-name
 ```
+
+**Word文档水印功能**（v2.3.2）：
+- 自动提取Word文档中的所有图片
+- 为每张图片添加项目名称水印
+- 支持PNG和JPG格式图片
+- 保留文档原有格式和布局
+- 可覆盖原文件或生成新文件
 
 ## API 端点
 
