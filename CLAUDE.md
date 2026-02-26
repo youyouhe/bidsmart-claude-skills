@@ -27,7 +27,7 @@ S1: Analysis → S2: Verification → S3: Info Collection → S4: Commercial →
 
 **Key Skills:**
 - **bid-manager** - Orchestrates complete workflow, tracks progress in `pipeline_progress.json`
-- **bid-analysis** - Parses tender documents (PDF/Word), extracts scoring criteria and requirements
+- **bid-analysis** - Parses tender documents (PDF/Word/Excel), extracts scoring criteria and requirements, supports multi-file input
 - **bid-verification** - Validates analysis report against source documents
 - **bid-tech-proposal** - Writes technical proposal markdown files
 - **bid-commercial-proposal** - Writes commercial proposal markdown files
@@ -38,7 +38,11 @@ S1: Analysis → S2: Verification → S3: Info Collection → S4: Commercial →
 
 ### Data Flow
 
-1. **Input**: Tender/procurement documents (PDF or Word format, Word preferred)
+1. **Input**: Tender/procurement documents (supports multiple files)
+   - **Word (.docx)** - Preferred format (accurate text and table extraction)
+   - **PDF** - Supported with TOC extraction and OCR
+   - **Excel (.xlsx, .xls)** - NEW: Technical specifications, quotation lists, parameter tables
+   - Multiple files supported: tender documents + technical specs + contract templates
 2. **Analysis**: Outputs `分析报告.md` (fixed filename, required by downstream skills)
 3. **Proposals**: Markdown files in `响应文件/` directory, numbered sequentially (e.g., `01-报价函.md`)
 4. **Final Output**: Word document in `响应文件/` directory
@@ -148,6 +152,41 @@ git push origin v1.0.0
 5. Fallback: Use Read tool to read PDF directly in 15-20 page chunks
 
 **Critical**: Chinese government tender documents often have critical data (scoring criteria, payment terms) in tables. Tables must be fully extracted, not summarized.
+
+### Excel Processing Strategy (NEW in v2.4.0)
+
+**Priority**: Excel files contain detailed technical specifications, quotation lists, and parameter tables that complement main tender documents.
+
+**Typical Excel Files**:
+- Technical specification tables (功能参数表)
+- Quotation/budget lists (报价清单)
+- Feature comparison tables (功能对比表)
+- Scoring criteria details (评分细则表)
+
+**Excel Workflow**:
+1. Run `parse_excel.py` to extract all worksheets and data
+2. Generates both JSON (structured) and Markdown (human-readable) outputs
+3. Skills read Markdown format for easy table comprehension
+4. Supports multi-file processing (batch mode)
+5. Fallback: Claude can directly read Excel files
+
+**Usage**:
+```bash
+# Single file
+python skills/bid-analysis/scripts/parse_excel.py 技术规范.xlsx --format both
+
+# Output:
+# - 技术规范_data.json (complete data)
+# - 技术规范_data.md (formatted tables)
+```
+
+**Multi-File Integration**:
+- Main file (磋商文件.docx): Scoring criteria, process requirements
+- Excel files: Detailed parameters, pricing breakdown
+- Contract templates: Payment terms, warranty periods
+- All information merged into unified analysis report with source attribution
+
+**See**: `skills/bid-analysis/MULTI_FILE_EXAMPLE.md` for complete workflow examples.
 
 ### Word Document Generation
 
