@@ -32,6 +32,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mermaid diagram rendering
 - Automated workflow orchestration
 
+## [1.1.0] - 2026-03-05
+
+### Added
+- **bid-software-design**: Software design document generation skill
+  - Three-phase architecture: Phase 0 (design metadata), Phase 1 (high-level design), Phase 2 (detailed design per sub-module)
+  - Automatic system sizing (small/medium/large) with smart split strategy
+  - Full traceability from requirements to design artifacts (DB tables, APIs, state machines)
+  - Database DDL generation with naming conventions and common fields
+  - RESTful API detailed design with request/response specs
+  - Business logic design including state machines, algorithms, and scheduled tasks
+  - Repair mode for iterative refinement based on review feedback
+
 ## [Unreleased]
 
 ### Planned
