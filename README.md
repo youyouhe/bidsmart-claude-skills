@@ -11,14 +11,15 @@ Comprehensive Claude Code skills for Chinese government procurement and bid mana
 1. **📋 Bid Analysis** (`/bid-analysis`) - Analyze tender documents (PDF/Word), extract scoring criteria, technical requirements, budget constraints, and generate structured outlines
 2. **✅ Bid Verification** (`/bid-verification`) - Automatically verify analysis reports and correct errors
 3. **📝 Requirements Extraction** (`/bid-requirements`) - Extract detailed requirements from tender documents
-4. **💼 Commercial Proposal** (`/bid-commercial-proposal`) - Write complete commercial bid documents with all required attachments
-5. **🔧 Technical Proposal** (`/bid-tech-proposal`) - Write complete technical bid documents
-6. **📊 Mermaid Diagrams** (`/bid-mermaid-diagrams`) - Generate and replace diagram placeholders with rendered images
-7. **🔍 Material Search** (`/bid-material-search`) - Batch replace scanned document placeholders with actual files
-8. **📦 Material Extraction** (`/bid-material-extraction`) - Extract materials from company resource library
-9. **🎯 Bid Assembly** (`/bid-assembly`) - Comprehensive quality check and generate verification report
-10. **📄 MD to DOCX** (`/bid-md2doc`) - Convert markdown proposals to final Word documents
-11. **🎭 Bid Manager** (`/bid-manager`) - Orchestrate the complete bid workflow end-to-end
+4. **🏗️ Software Design** (`/bid-software-design`) - Generate software high-level and detailed design documents from requirement specifications
+5. **💼 Commercial Proposal** (`/bid-commercial-proposal`) - Write complete commercial bid documents with all required attachments
+6. **🔧 Technical Proposal** (`/bid-tech-proposal`) - Write complete technical bid documents
+7. **📊 Mermaid Diagrams** (`/bid-mermaid-diagrams`) - Generate and replace diagram placeholders with rendered images
+8. **🔍 Material Search** (`/bid-material-search`) - Batch replace scanned document placeholders with actual files
+9. **📦 Material Extraction** (`/bid-material-extraction`) - Extract materials from company resource library
+10. **🎯 Bid Assembly** (`/bid-assembly`) - Comprehensive quality check and generate verification report
+11. **📄 MD to DOCX** (`/bid-md2doc`) - Convert markdown proposals to final Word documents
+12. **🎭 Bid Manager** (`/bid-manager`) - Orchestrate the complete bid workflow end-to-end
 
 ## 📦 Installation
 
@@ -34,7 +35,7 @@ In Claude Code, run these commands:
 /plugin install bidsmart-skills@bidsmart-skills
 ```
 
-That's it! Restart Claude Code and all 11 skills will be available.
+That's it! Restart Claude Code and all 12 skills will be available.
 
 ### Method 2: Manual Configuration
 
@@ -100,33 +101,33 @@ Restart Claude Code to load the skills.
 
 ### Typical Workflow
 
-1. **Analyze Tender Document**
+13. **Analyze Tender Document**
    ```bash
    /bid-analysis tender.pdf
    ```
    - Extracts all requirements and scoring criteria
    - Generates structured outline
 
-2. **Extract Requirements**
+14. **Extract Requirements**
    ```bash
    /bid-requirements tender.pdf
    ```
    - Detailed technical and commercial requirements
 
-3. **Write Proposals**
+15. **Write Proposals**
    ```bash
    /bid-tech-proposal
    /bid-commercial-proposal
    ```
    - Generates complete proposal documents based on analysis
 
-4. **Generate Diagrams**
+16. **Generate Diagrams**
    ```bash
    /bid-mermaid-diagrams
    ```
    - Renders all mermaid diagram placeholders
 
-5. **Assemble & Convert**
+17. **Assemble & Convert**
    ```bash
    /bid-assembly
    /bid-md2doc
@@ -174,6 +175,7 @@ bidsmart-claude-skills/
 │   │   └── scripts/             # Helper scripts
 │   ├── bid-verification/
 │   ├── bid-requirements/
+│   ├── bid-software-design/
 │   ├── bid-commercial-proposal/
 │   ├── bid-tech-proposal/
 │   ├── bid-mermaid-diagrams/
