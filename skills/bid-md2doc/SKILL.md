@@ -136,12 +136,39 @@ generate_docx.js 支持 Markdown 图片语法 `![alt](file.png)`：
 - 支持 PNG 和 JPEG 格式
 - 图片不存在时插入红色 `[图片缺失: filename]` 占位文字
 
+## generate_docx.js 渲染行为
+
+编写 Markdown 时必须了解 generate_docx.js 的以下渲染规则，否则 Word 输出会出现排版问题：
+
+### 自动分页规则
+- **`##` 标题（H2）自动在前方插入分页**：每个 `##` 标题都会从新的一页开始
+- 这意味着封面、签章区等**不需要分页的内容，绝不可使用 `#` 或 `##` 标题标记**
+- 封面应使用 `**加粗正文**` 格式（参见 bid-commercial-proposal SKILL.md 3.0.1）
+
+### `&nbsp;` 空白行
+- Markdown 中的 `&nbsp;` 会被渲染为**空段落**（空白行），用于制造垂直间距
+- 常用于封面留白、签章区前后的空间
+- 普通空行在 Markdown 中会被折叠，`&nbsp;` 是保持留白的唯一方式
+
+### ImageRun 类型
+- 嵌入图片时必须指定 `type` 参数（`'png'` 或 `'jpg'`），否则图片扩展名会变成 `.undefined`，导致 Word 无法显示
+- generate_docx.js 已内置自动检测逻辑，基于文件扩展名确定类型
+
+### 行距
+- 正文段落和列表项默认使用 **1.5 倍行距**（`spacing.line: 360`）
+- 标题行距由标题样式控制（`spacing.before: 240, after: 120`）
+
+### 文件排序
+- CONFIG 支持 `fileOrder` 数组，指定文件的合并顺序
+- 多册模式下，商务文件（06-）应排在技术文件（01-05）之前
+
 ## 注意事项
 
 - 运行前确认 `响应文件/` 目录存在且有 .md 文件
 - 确认 `docx` npm 包已安装（`node_modules/docx`）
 - CONFIG 编辑仅修改 `CONFIG START` 和 `CONFIG END` 之间的内容，不改动其他代码
 - 如果生成失败，检查控制台错误信息并修复（常见：图片路径错误、特殊字符导致表格解析失败）
+- **Word 文件被占用时写入会失败**（EBUSY 错误）：生成前确保目标 .docx 文件未在 Word 中打开
 
 ## 完成状态
 
