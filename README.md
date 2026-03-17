@@ -15,7 +15,7 @@ Comprehensive Claude Code skills for Chinese government procurement and bid mana
 5. **💼 Commercial Proposal** (`/bid-commercial-proposal`) - Write complete commercial bid documents with all required attachments
 6. **🔧 Technical Proposal** (`/bid-tech-proposal`) - Write complete technical bid documents
 7. **📊 Mermaid Diagrams** (`/bid-mermaid-diagrams`) - Generate and replace diagram placeholders with rendered images
-8. **🔍 Material Search** - ⚠️ **Migrated to [material-hub](https://github.com/youyouhe/material-hub)** (v3.0+ uses MCP architecture for 10x performance)
+8. **🔍 Material Search** (`/bid-material-search`) - Search and retrieve materials from MaterialHub (v3.0: MCP架构，支持远程服务器，10x性能提升)
 9. **📦 Material Extraction** (`/bid-material-extraction`) - Extract materials from company resource library
 10. **🎯 Bid Assembly** (`/bid-assembly`) - Comprehensive quality check and generate verification report
 11. **📄 MD to DOCX** (`/bid-md2doc`) - Convert markdown proposals to final Word documents
@@ -84,6 +84,53 @@ Add to `.claude/settings.local.json`:
 ```
 
 Restart Claude Code to load the skills.
+
+## 🔧 MaterialHub Configuration (Required for Material Search)
+
+The `bid-material-search` skill requires a running MaterialHub API server. MaterialHub can run on the same machine (local) or on a remote server (client-server architecture).
+
+### Server Setup
+
+1. Clone and run MaterialHub:
+   ```bash
+   git clone https://github.com/youyouhe/material-hub.git
+   cd material-hub
+   pip install -r requirements.txt
+   python backend/main.py
+   ```
+
+2. MaterialHub API will run on `http://localhost:8201`
+
+### Client Configuration
+
+Create a `.env` file in the `bidsmart-claude-skills` root directory:
+
+**Local Development** (MaterialHub on the same machine):
+```bash
+MATERIALHUB_API_URL=http://localhost:8201
+MATERIALHUB_API_KEY=mh-mcp-xxx...  # Copy from material-hub/.env
+```
+
+**Remote Server** (MaterialHub on a different machine):
+```bash
+MATERIALHUB_API_URL=http://192.168.1.100:8201  # Server IP
+MATERIALHUB_API_KEY=mh-mcp-xxx...              # Copy from server
+```
+
+**Production (HTTPS)**:
+```bash
+MATERIALHUB_API_URL=https://materials.company.com
+MATERIALHUB_API_KEY=mh-mcp-prod-key
+```
+
+### Test Connection
+
+```bash
+cd skills/bid-material-search
+python test_skill.py
+```
+
+For detailed network configuration, see [NETWORK_CONFIG.md](skills/bid-material-search/NETWORK_CONFIG.md).
 
 ## 🚀 Usage
 
