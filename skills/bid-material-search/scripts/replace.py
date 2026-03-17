@@ -7,13 +7,189 @@ import os
 import re
 import httpx
 from pathlib import Path
-from typing import Any
+from typing import Any, List, Dict
 
 import search
 import watermark
 
 # Load configuration
 from config import API_BASE, API_TOKEN
+
+
+# 智能搜索策略
+def remove_common_suffixes(text: str) -> str:
+    """去除常见后缀和描述词
+
+    Args:
+        text: 原始文本
+
+    Returns:
+        去除后缀后的文本
+    """
+    # 阶段1：去除描述性短语
+    descriptive_phrases = [
+        '正反面', '扫描件', '复印件', '副本', '原件', '电子件',
+        '（如需要）', '(如需要)', '近三个月内', '有效期内',
+    ]
+    result = text
+    for phrase in descriptive_phrases:
+        result = result.replace(phrase, '')
+
+    # 阶段2：去除常见后缀
+    suffixes = [
+        '认证证书', '证书', '认证', '证明', '文件', '材料', '附件'
+    ]
+    for suffix in suffixes:
+        if result.endswith(suffix):
+            result = result[:-len(suffix)]
+
+    return result.strip()
+
+
+def extract_keywords(query: str) -> List[str]:
+    """提取关键词
+
+    提取查询词中的核心识别特征，如标准号、数字、关键名词等。
+
+    Args:
+        query: 查询词
+
+    Returns:
+        关键词列表
+    """
+    keywords = []
+
+    # ISO 标准号（如 ISO 27001, ISO/IEC 27001）
+    iso_match = re.search(r'ISO[/\s]?(?:IEC)?[\s]?(\d+)', query, re.IGNORECASE)
+    if iso_match:
+        keywords.append(iso_match.group(1))  # 只提取数字
+        keywords.append(f'ISO {iso_match.group(1)}')
+
+    # CMMI 等级
+    cmmi_match = re.search(r'CMMI[\s]?(\d+)', query, re.IGNORECASE)
+    if cmmi_match:
+        keywords.append(f'CMMI{cmmi_match.group(1)}')
+        keywords.append(f'CMMI {cmmi_match.group(1)}')
+
+    # 去掉数字、括号等，提取主要名词
+    clean = re.sub(r'[（）()【】\[\]0-9一二三四五六七八九十]+', '', query)
+    if clean.strip():
+        keywords.append(clean.strip())
+
+    return keywords
+
+
+def expand_abbreviation(query: str) -> str:
+    """展开简称
+
+    将常见简称扩展为全称。
+
+    Args:
+        query: 查询词
+
+    Returns:
+        扩展后的查询词
+    """
+    abbreviations = {
+        '财审': '财务审计报告',
+        '营执': '营业执照',
+        '等保': '信息系统安全等级保护',
+        '软著': '软件著作权',
+        '社保': '社会保险',
+        '高企': '高新技术企业',
+    }
+
+    for abbr, full in abbreviations.items():
+        if abbr in query:
+            query = query.replace(abbr, full)
+
+    return query
+
+
+def apply_synonyms(query: str) -> List[str]:
+    """应用同义词映射
+
+    生成同义词变体，扩大匹配范围。
+
+    Args:
+        query: 查询词
+
+    Returns:
+        包含原词和同义词的列表
+    """
+    result = [query]
+
+    synonyms = {
+        '委托代理人': ['委托人', '代理人'],
+        '法定代表人': ['法人', '法人代表', '法定代表'],
+        '项目经理': ['项目负责人', '经理'],
+        '团队成员': ['成员', '人员'],
+    }
+
+    for key, syn_list in synonyms.items():
+        if key in query:
+            for syn in syn_list:
+                result.append(query.replace(key, syn))
+
+    return result
+
+
+async def smart_search(query: str, limit: int = 5) -> List[Dict]:
+    """智能搜索材料
+
+    实现多级回退搜索策略：
+    1. 尝试完整查询词
+    2. 尝试同义词变体
+    3. 尝试去除后缀
+    4. 尝试关键词
+    5. 展开简称后重试
+
+    Args:
+        query: 原始查询词
+        limit: 返回数量上限
+
+    Returns:
+        搜索结果列表
+    """
+    # 策略1: 展开简称
+    expanded_query = expand_abbreviation(query)
+
+    # 策略2: 生成多个查询词（从具体到模糊）
+    queries_to_try = [
+        expanded_query,                          # 完整词（展开简称后）
+    ]
+
+    # 策略3: 添加同义词变体
+    synonym_variants = apply_synonyms(expanded_query)
+    queries_to_try.extend(synonym_variants)
+
+    # 策略4: 去除后缀和描述词
+    queries_to_try.append(remove_common_suffixes(expanded_query))
+
+    # 策略5: 添加关键词
+    keywords = extract_keywords(expanded_query)
+    queries_to_try.extend(keywords)
+
+    # 去重并保持顺序
+    seen = set()
+    unique_queries = []
+    for q in queries_to_try:
+        q = q.strip()
+        if q and q not in seen:
+            seen.add(q)
+            unique_queries.append(q)
+
+    # 逐个尝试
+    for i, q in enumerate(unique_queries):
+        results = await search.search_materials(query=q, limit=limit)
+        if results:
+            if i > 0:
+                # 记录使用了哪个查询词成功
+                print(f"    [回退搜索] 使用查询词 \"{q}\" 找到 {len(results)} 个结果")
+            return results
+
+    # 所有策略都失败
+    return []
 
 
 async def download_image(url: str, output_path: str) -> bool:
@@ -75,8 +251,8 @@ async def replace_placeholder(
             "image_path": str,  # 如果成功
         }
     """
-    # 1. 搜索文档
-    results = await search.search_materials(query=query, limit=5)
+    # 1. 智能搜索文档（使用多级回退策略）
+    results = await smart_search(query=query, limit=5)
     if not results:
         return {"success": False, "message": f"未找到匹配 '{query}' 的材料"}
 
@@ -97,13 +273,23 @@ async def replace_placeholder(
 
     files = current_revision.get("files", [])
     image_file = None
+
+    # 优先查找原始图片文件
     for f in files:
         if f.get("file_type") == "original" and f.get("mime_type", "").startswith("image/"):
             image_file = f
             break
 
+    # 如果没有原始图片，查找从PDF提取的页面图片
     if not image_file:
-        return {"success": False, "message": "文档没有图片附件"}
+        extracted_pages = [f for f in files if f.get("file_type") == "extracted_page"]
+        if extracted_pages:
+            # 使用第一页（通常是最重要的）
+            image_file = extracted_pages[0]
+            print(f"    [PDF提取] 使用提取的第1页图片")
+
+    if not image_file:
+        return {"success": False, "message": "文档没有图片附件（无原始图片或提取页面）"}
 
     # 4. 下载图片
     image_url = image_file.get("url")
