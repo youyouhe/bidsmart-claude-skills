@@ -15,7 +15,7 @@ Comprehensive Claude Code skills for Chinese government procurement and bid mana
 5. **💼 Commercial Proposal** (`/bid-commercial-proposal`) - Write complete commercial bid documents with all required attachments
 6. **🔧 Technical Proposal** (`/bid-tech-proposal`) - Write complete technical bid documents
 7. **📊 Mermaid Diagrams** (`/bid-mermaid-diagrams`) - Generate and replace diagram placeholders with rendered images
-8. **🔍 Material Search** (`/bid-material-search`) - Batch replace scanned document placeholders with actual files
+8. **🔍 Material Search** - ⚠️ **Migrated to [material-hub](https://github.com/youyouhe/material-hub)** (v3.0+ uses MCP architecture for 10x performance)
 9. **📦 Material Extraction** (`/bid-material-extraction`) - Extract materials from company resource library
 10. **🎯 Bid Assembly** (`/bid-assembly`) - Comprehensive quality check and generate verification report
 11. **📄 MD to DOCX** (`/bid-md2doc`) - Convert markdown proposals to final Word documents
@@ -154,6 +154,19 @@ Orchestrates the complete bid workflow by coordinating all other skills. Manages
 
 **Triggers**: User wants complete bid management workflow or needs help coordinating multiple bid skills.
 
+### ⚠️ Bid Material Search - Migrated
+
+**bid-material-search** skill has been migrated to the [material-hub](https://github.com/youyouhe/material-hub) repository (v3.0+).
+
+**Why migrated?**
+- Tightly coupled with MaterialHub API and MCP server
+- v3.0 uses MCP architecture (no FastAPI middleware) for 10x performance improvement
+- Better maintained alongside MaterialHub infrastructure
+
+**New location**: https://github.com/youyouhe/material-hub/tree/main/.claude/skills/bid-material-search
+
+**For users**: The skill still works seamlessly in bid workflows when MaterialHub is available.
+
 ## 🛠️ Technical Details
 
 ### Dependencies
@@ -179,13 +192,15 @@ bidsmart-claude-skills/
 │   ├── bid-commercial-proposal/
 │   ├── bid-tech-proposal/
 │   ├── bid-mermaid-diagrams/
-│   ├── bid-material-search/
 │   ├── bid-material-extraction/
 │   ├── bid-assembly/
 │   ├── bid-md2doc/
-│   └── bid-manager/
+│   ├── bid-manager/
+│   └── bigmodel-ocr/
 ├── README.md
 └── LICENSE
+
+Note: bid-material-search migrated to material-hub repository
 ```
 
 ## 🌏 Language Support
