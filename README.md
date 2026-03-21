@@ -9,17 +9,18 @@ Comprehensive Claude Code skills for Chinese government procurement and bid mana
 ### Complete Bid Management Workflow
 
 1. **📋 Bid Analysis** (`/bid-analysis`) - Analyze tender documents (PDF/Word), extract scoring criteria, technical requirements, budget constraints, and generate structured outlines
-2. **✅ Bid Verification** (`/bid-verification`) - Automatically verify analysis reports and correct errors
-3. **📝 Requirements Extraction** (`/bid-requirements`) - Extract detailed requirements from tender documents
-4. **🏗️ Software Design** (`/bid-software-design`) - Generate software high-level and detailed design documents from requirement specifications
-5. **💼 Commercial Proposal** (`/bid-commercial-proposal`) - Write complete commercial bid documents with all required attachments
-6. **🔧 Technical Proposal** (`/bid-tech-proposal`) - Write complete technical bid documents
-7. **📊 Mermaid Diagrams** (`/bid-mermaid-diagrams`) - Generate and replace diagram placeholders with rendered images
-8. **🔍 Material Search** (`/bid-material-search`) - Search and retrieve materials from MaterialHub (v3.0: MCP架构，支持远程服务器，10x性能提升)
-9. **📦 Material Extraction** (`/bid-material-extraction`) - Extract materials from company resource library
-10. **🎯 Bid Assembly** (`/bid-assembly`) - Comprehensive quality check and generate verification report
-11. **📄 MD to DOCX** (`/bid-md2doc`) - Convert markdown proposals to final Word documents
-12. **🎭 Bid Manager** (`/bid-manager`) - Orchestrate the complete bid workflow end-to-end
+2. **🎯 Bid Evaluation** (`/bid-evaluation`) - Evaluate bid feasibility based on scoring criteria, auto-assess objective items, generate scoring sheets for subjective items, help users decide whether to bid
+3. **✅ Bid Verification** (`/bid-verification`) - Automatically verify analysis reports and correct errors
+4. **📝 Requirements Extraction** (`/bid-requirements`) - Extract detailed requirements from tender documents
+5. **🏗️ Software Design** (`/bid-software-design`) - Generate software high-level and detailed design documents from requirement specifications
+6. **💼 Commercial Proposal** (`/bid-commercial-proposal`) - Write complete commercial bid documents with all required attachments
+7. **🔧 Technical Proposal** (`/bid-tech-proposal`) - Write complete technical bid documents
+8. **📊 Mermaid Diagrams** (`/bid-mermaid-diagrams`) - Generate and replace diagram placeholders with rendered images
+9. **🔍 Material Search** (`/bid-material-search`) - Search and retrieve materials from MaterialHub (v3.0: MCP架构，支持远程服务器，10x性能提升)
+10. **📦 Material Extraction** (`/bid-material-extraction`) - Extract materials from company resource library
+11. **🎯 Bid Assembly** (`/bid-assembly`) - Comprehensive quality check and generate verification report
+12. **📄 MD to DOCX** (`/bid-md2doc`) - Convert markdown proposals to final Word documents
+13. **🎭 Bid Manager** (`/bid-manager`) - Orchestrate the complete bid workflow end-to-end
 
 ## 📦 Installation
 
