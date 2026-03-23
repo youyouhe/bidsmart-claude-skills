@@ -21,6 +21,21 @@ description: >
 
 **一次只写一个系统** — Phase 1 每次调用处理一个子系统，保证专注和完整性。
 
+## ⚠️ 文件生成规范（防止覆盖问题）
+
+生成元数据文件和需求规格时使用 bash cat append：
+```bash
+cat > "_metadata.md" << 'EOF'
+# 项目元数据
+[第一部分]
+EOF
+
+cat >> "_metadata.md" << 'EOF'
+[后续部分]
+EOF
+```
+❌ 禁止多次 write 覆盖同一文件。
+
 ## 两阶段架构
 
 ```
