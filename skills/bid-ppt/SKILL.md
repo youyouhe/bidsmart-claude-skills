@@ -251,7 +251,20 @@ DM Sans, Outfit, Figtree, Epilogue
 6. **装饰色块**：面积至少占幻灯片 20%，允许出血超出边缘
 7. **标题允许压在色块上**，制造视觉张力
 8. **禁止对 h1/h2 使用 `transform: rotate`** — 会破坏文档流
-9. **内容区域高度自适应**：
+9. **留白与内容适配平衡**（关键原则）：
+   - **目标**：在保证内容完整显示的前提下，最大化留白
+   - **策略**：留白和字号是跷跷板关系，需要同步调整
+   - **标准密度**（≤5项）：大留白 + 大字号
+     - `.slide` padding: 80px, card padding: 30px, item gap: 30px
+     - p 字号: 1.4vw, 行高: 1.6
+   - **中等密度**（6-10项）：中等留白 + 中等字号
+     - `.slide` padding: 50-60px, card padding: 18-20px, item gap: 18-20px
+     - p 字号: 1.0-1.1vw, 行高: 1.5
+   - **高密度**（>10项）：小留白 + 小字号
+     - `.slide` padding: 40-50px, card padding: 15px, item gap: 16px
+     - p 字号: 0.9vw, 行高: 1.4
+   - **⚠️ 关键**：增加留白时必须减小字号/间距，否则会溢出
+10. **内容区域高度自适应**：
    - ❌ 禁止对内容容器设置固定 `height: 60%` 等百分比高度
    - ✅ 使用 `max-height: 85%` 或让容器自适应内容
    - ✅ 对 `.slide` 设置 `padding` 预留边距，而非限制内容高度
@@ -270,24 +283,99 @@ function getDensityLevel(content) {
   return 'high';                              // 高密度
 }
 
-// 字号配置（CSS 变量）
-const fontSizes = {
-  standard: { h1: '4.5vw', h2: '2.5vw', h3: '1.8vw', p: '1.4vw' },
-  medium:   { h1: '3.8vw', h2: '2.2vw', h3: '1.5vw', p: '1.1vw' },
-  high:     { h1: '3.2vw', h2: '1.8vw', h3: '1.3vw', p: '0.9vw' },
-};
-
-// 间距配置（padding/margin）
-const spacing = {
-  standard: { padding: '80px', lineHeight: '1.6' },
-  medium:   { padding: '60px', lineHeight: '1.5' },
-  high:     { padding: '50px', lineHeight: '1.4' },
+// 字号与间距配置（必须同步调整）
+const densityConfig = {
+  standard: {
+    // 字号（大）
+    h1: '4.5vw', h2: '2.5vw', h3: '1.8vw', p: '1.4vw',
+    // 间距（大）
+    slidePadding: '80px', contentGap: '40px', cardPadding: '30px',
+    itemGap: '30px', lineHeight: '1.6'
+  },
+  medium: {
+    // 字号（中小）- 精确校准以消除溢出
+    h1: '3.5vw', h2: '2.0vw', h3: '1.35vw', p: '0.95vw',
+    // 间距（紧凑但保持可读）- 为 9 项内容优化
+    slidePadding: '50px', contentGap: '24px', cardPadding: '16px',
+    itemGap: '16px', lineHeight: '1.45'
+  },
+  high: {
+    // 字号（小）
+    h1: '3.2vw', h2: '1.8vw', h3: '1.3vw', p: '0.9vw',
+    // 间距（小）
+    slidePadding: '40px', contentGap: '20px', cardPadding: '15px',
+    itemGap: '16px', lineHeight: '1.4'
+  },
 };
 ```
 
-**应用示例**：
-- 三级服务体系（9 项服务）→ medium 密度 → p 字号 1.1vw
-- 列表 15 项 → high 密度 → p 字号 0.9vw + 减少行间距
+**应用示例（三级服务体系 - 9 项内容）**：
+
+Medium 密度配置（精确校准，零溢出）：
+- ✅ h3 标题: **1.35vw**（卡片标题，稍微缩小）
+- ✅ p 描述: **0.95vw**（从 1.0vw 微调，彻底消除溢出）
+- ✅ slide padding: **50px**（保持适度留白）
+- ✅ card padding: **16px**（从 18px 减小，节省垂直空间）
+- ✅ item gap: **16px**（从 18px 减小，紧凑但不拥挤）
+- ✅ line-height: **1.45**（从 1.5 微调，节省行间距）
+
+**关键调整**：每个参数微调 10-15%，累计节省约 40-50px 垂直空间
+
+**留白与字号平衡策略**：
+
+```css
+/* ✅ 最优：medium 密度精确配置（9 项内容零溢出） */
+.slide {
+  padding: 50px;  /* 保持适度留白 */
+}
+
+.level-items {
+  gap: 16px;  /* 从 18px 减小，节省垂直空间 */
+}
+
+.level-item {
+  padding: 16px;  /* 从 18px 减小，累计节省空间 */
+}
+
+.item-title {
+  font-size: 1.35vw;   /* h3 标题微调 */
+}
+
+.item-desc {
+  font-size: 0.95vw;   /* 从 1.0vw 微调，彻底消除溢出 */
+  line-height: 1.45;   /* 从 1.5 微调，节省行间距 */
+}
+
+/* ⚠️ 次优：会有轻微溢出（10-15px） */
+.slide {
+  padding: 50px;
+}
+.item-desc {
+  font-size: 1.0vw;    /* ⚠️ 稍大，导致 10px 溢出 */
+  line-height: 1.5;
+}
+/* 结果：4个元素超出 10px */
+
+/* ❌ 错误：留白过大 + 字号过大 = 严重溢出 */
+.slide {
+  padding: 60px;       /* ❌ 留白太大 */
+}
+.item-desc {
+  font-size: 1.1vw;    /* ❌ 字号太大 */
+}
+/* 结果：底部内容被截断 44px！ */
+
+/* ❌ 错误：留白过小 = 拥挤感 */
+.slide {
+  padding: 40px;       /* ❌ 留白太小 */
+}
+.level-items {
+  gap: 10px;           /* ❌ 过于密集 */
+}
+/* 结果：视觉窒息，没有呼吸感！ */
+```
+
+**关键原则**：留白增加 → 字号必须减小，否则必定溢出
 
 **高度控制示例**：
 
@@ -315,7 +403,20 @@ const spacing = {
 .framework-container {
   flex: 1;  /* 占据剩余空间 */
   min-height: 0;  /* 允许收缩 */
-  overflow: visible;  /* 或 auto */
+}
+
+/* ❌ 禁止内容区域出现滚动条！演示文稿必须一屏显示 */
+.level-items {
+  overflow-y: auto;  /* ❌ 错误！产生滚动条 */
+}
+
+/* ✅ 正确：让内容自动换行或收缩，而非滚动 */
+.level-items {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  /* 不设置 overflow-y: auto */
 }
 ```
 
@@ -485,3 +586,75 @@ pptx_png2pptx(workDir='ppt/training')  # 替换为实际子目录路径
 4. **中文排版**：注意中文字体渲染，避免字体回退到系统默认
 5. **打印友好**：如果用户可能需要打印，避免深色背景风格
 6. **文件大小**：PPTX 控制在 10MB 以内，图表优先用矢量
+7. **禁止滚动条**：演示文稿必须一屏显示所有内容，禁止任何内容区域出现滚动条（`overflow-y: auto`）
+
+## 内容完整性与视觉平衡自检清单
+
+在生成 HTML 后、调用 `pptx_html2png` 前，必须自检以下 5 点：
+
+### 1. 检查是否有固定高度限制
+```bash
+# 搜索危险的固定高度设置
+grep -n "height: [0-9]*%" ppt/*/slide-*.html
+```
+✅ 期望结果：仅 `.slide` 容器有固定高度，内容容器不应有
+❌ 如发现 `.framework-container`、`.content-area` 等内容容器有 `height: 60%`，必须修改为 `flex: 1` 或 `max-height`
+
+### 2. 检查是否有滚动条
+```bash
+# 搜索滚动条设置
+grep -n "overflow-y: auto" ppt/*/slide-*.html
+```
+✅ 期望结果：无任何匹配（演示文稿禁止滚动条）
+❌ 如发现任何 `overflow-y: auto` 或 `overflow: auto`（除了 `body` 标签），必须删除
+
+### 3. 验证字体大小是否符合内容密度
+对于 9 项内容的幻灯片：
+- 标题字号：1.5vw（item-title）
+- 描述字号：1.1vw（item-desc）
+- 行高：1.5
+
+对于 15+ 项内容的幻灯片：
+- 标题字号：1.3vw
+- 描述字号：0.9vw
+- 行高：1.4
+
+### 4. 检查留白与字号平衡
+```bash
+# 检查 padding/gap 和字号是否平衡
+grep -n "padding:\|gap:\|font-size:" ppt/*/slide-*.html | grep -E "(slide|item)"
+```
+对于 medium 密度（6-10 项内容），精确配置：
+- ✅ **最优（零溢出）**: `padding: 50px` + `p: 0.95vw` + `gap: 16px` + `card: 16px` + `line-height: 1.45`
+- ⚠️ **次优（轻微溢出）**: `padding: 50px` + `p: 1.0vw` + `gap: 18px` → 溢出约 10px
+- ❌ **错误**: `padding: 60px` + `p: 1.1vw` → 溢出 44px+
+
+**微调策略**（针对 10px 级别的溢出）：
+1. 优先调整字号: `p: 1.0vw → 0.95vw`（节省约 15-20px）
+2. 其次调整间距: `gap: 18px → 16px`（每个 item 节省 2px，9个累计 18px）
+3. 再调整 padding: `card: 18px → 16px`（每个 card 节省 4px，9个累计 36px）
+4. 最后调整行高: `line-height: 1.5 → 1.45`（多行文本节省约 10-15px）
+
+**目标**: 溢出检测显示 "溢出 0px, 0 个元素被裁剪"
+
+### 5. 在浏览器中预览验证
+```bash
+# 打开 HTML 文件，检查视觉平衡
+file://path/to/slide-06-三级服务体系.html
+```
+✅ 期望结果（同时满足）：
+  - ✅ 所有内容完整可见，无滚动条，**底部无溢出**（最高优先级）
+  - ✅ 内容与边缘有明显间距（不紧贴边框）
+  - ✅ 卡片之间、文字之间有舒适的呼吸感
+  - ✅ 整体布局平衡，不会过于拥挤或松散
+
+❌ 如发现问题，按优先级修复：
+  - **P0: 底部溢出/截断** → 立即减小字号（p: 1.1vw → 1.0vw）或减少 padding（60px → 50px）
+  - **P1: 滚动条出现** → 移除 `overflow-y: auto`
+  - **P2: 过于拥挤** → 在不溢出前提下，增加 padding/gap
+  - P3: 过于松散 → 增加字号或减少留白（但保持 padding ≥ 40px）
+
+**调试流程**：
+1. 如果溢出：优先减小字号 0.1vw，再减小 padding 10px
+2. 如果拥挤：优先增加 gap，再增加 padding（但监控是否溢出）
+3. 迭代调整，直到达到平衡点
