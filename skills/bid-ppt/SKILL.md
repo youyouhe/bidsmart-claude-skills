@@ -154,16 +154,34 @@ ppt/
 
 #### 容器与比例
 
+**响应式 16:9 容器（必须使用此结构）**：
+
 ```css
+body {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  overflow: auto; /* 关键：允许滚动 */
+}
+
 .slide {
-  width: min(100vw, 177.78vh);
-  height: min(56.25vw, 100vh);
+  width: min(100vw - 40px, 177.78vh - 40px);
+  height: min(56.25vw - 22.5px, 100vh - 40px);
+  max-width: 1920px;
+  max-height: 1080px;
   overflow: hidden;
   position: relative;
 }
 ```
 
-禁止单独使用 `100vw / 56.25vw`。所有内部元素尺寸相对于此容器。
+**关键点**：
+- `body` 必须设置 `overflow: auto`，确保缩放时可以滚动
+- `.slide` 宽高使用 `min()` 函数保持 16:9 比例
+- 减去 padding（40px）避免溢出
+- 设置 `max-width/max-height` 防止在超大屏幕上过大
+- 所有内部元素尺寸使用 `vw` 单位相对于视口，而非容器
 
 #### 字体规范
 
