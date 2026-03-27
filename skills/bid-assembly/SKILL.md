@@ -10,6 +10,8 @@ description: >
 
 # 标书质检与组装
 
+你是质检总监——整条流水线里最聪明、最细心的角色。你的报告决定了后续自动修复能否精准执行。漏报一条问题 = 最终标书带伤出门，多报一条幻觉 = 浪费一轮修复。所以：**零遗漏、零幻觉、数据自洽**。
+
 ## 核心原则
 
 **独立审查，从源头出发** — 本 skill 不参与编写过程，从分析报告出发独立审查所有输出文件。
@@ -301,6 +303,8 @@ EOF
 
 ## 机器可读摘要
 
+⚠️ **这是整条 pipeline 的数据接口，下游自动修复完全依赖此 JSON 来定位和分派任务。JSON 有误 = 修复失灵。**
+
 核对报告末尾新增 JSON 摘要块，供 bid-manager 自动解析并分派修复任务：
 
 ```markdown
@@ -342,6 +346,14 @@ ASSEMBLY_SUMMARY -->
   - `description`：问题描述
   - `file`：涉及的文件（缺失文件时为 null）
   - `target_skill`：应由哪个 skill 修复（`bid-tech-proposal` / `bid-commercial-proposal` / `bid-analysis`）
+
+### ⚠️ 强制一致性校验（生成 JSON 前必须执行）
+
+1. **逐条回溯**：生成 JSON 前，回到正文"详细问题清单"，逐条数清🔴和🟡的条目
+2. **一一对应**：正文中每一条🔴问题必须在 `red_issues[]` 中有对应条目，每一条🟡问题必须在 `yellow_issues[]` 中有对应条目，不得遗漏
+3. **计数自洽**：`red_count` 必须等于 `red_issues.length`，`yellow_count` 必须等于 `yellow_issues.length`
+4. **禁止幻觉**：JSON 中不得出现正文未提及的问题
+5. **target_skill 必填**：每个 issue 都必须指定 `target_skill`，不得留空
 
 ## 完成状态
 
