@@ -72,20 +72,51 @@ N+2. 致谢/Q&A — 结语页
 
 #### 文件组织
 
-每张幻灯片生成一个独立的 HTML 文件：
+**目录结构策略**：
+
+为避免多次运行时文件混乱，采用**主题子目录**策略：
+
+1. **首次检查**：运行 `ls -la ppt/` 查看是否已有幻灯片文件
+2. **智能决策**：
+   - 如果 `ppt/` 下已有 `slide-*.html` 文件 → 判断是否与当前主题相关
+   - 如果主题不同 → 创建新的子目录 `ppt/<主题slug>/`
+   - 如果主题相同 → 续写现有文件
+3. **主题命名规则**：
+   - 培训方案 → `ppt/training/`
+   - 技术方案 → `ppt/technical/`
+   - 商务方案 → `ppt/commercial/`
+   - 项目汇报 → `ppt/report/`
+   - 其他 → `ppt/<自定义英文缩写>/`
+
+**输出结构示例**：
 ```
-slide-01-封面.html
-slide-02-目录.html
-slide-03-正文1.html
-...
-slide-N-致谢.html
+ppt/
+├── technical/              # 技术方案 PPT
+│   ├── slide-01-封面.html
+│   ├── slide-02-目录.html
+│   ├── slides.html
+│   └── 演示文稿.pptx
+└── training/               # 培训方案 PPT
+    ├── slide-01-封面.html
+    ├── slide-03-培训概述.html
+    ├── slides.html
+    └── 演示文稿.pptx
 ```
+
+**禁止行为**：
+- ❌ 直接在 `ppt/` 根目录创建幻灯片文件（会导致多主题混乱）
+- ❌ 使用时间戳作为目录名（无语义）
 
 #### 生成流程
 
-1. **第一步**：生成 `slide-01-封面.html`（包含完整 CSS 样式）
-2. **第二步**：逐个生成 `slide-02.html` 到 `slide-N.html`（复用相同样式）
-3. **第三步**：生成 `merge.js` 脚本，用于合并所有单页为 `slides.html`
+1. **前置步骤**：
+   - 运行 `ls -la ppt/` 检查是否已有幻灯片
+   - 确定当前主题（从用户消息或源文档推断）
+   - 如果 `ppt/` 根目录已有其他主题的幻灯片，创建子目录 `ppt/<主题>/`
+   - 运行 `mkdir -p ppt/<主题>` 创建输出目录
+2. **第一步**：生成 `ppt/<主题>/slide-01-封面.html`（包含完整 CSS 样式）
+3. **第二步**：逐个生成 `slide-02.html` 到 `slide-N.html`（复用相同样式）
+4. **第三步**：生成 `merge.js` 脚本，用于合并所有单页为 `slides.html`
 
 #### 单页 HTML 结构
 
@@ -196,36 +227,36 @@ JavaScript 中所有引号、尖括号必须保持原始字符，禁止 HTML 实
 
 所有单页生成完成后：
 
-1. 运行 `node merge.js` 生成 `slides.html`（合并版）
+1. 运行 `cd ppt && node merge.js` 生成 `ppt/slides.html`（合并版）
 2. 告知用户：
 
 ```
-✅ 已生成 N 个单页 HTML + 合并版 slides.html
+✅ 已生成 N 个单页 HTML + 合并版 slides.html（输出目录: ppt/）
 
 预览方式：
-- 单页预览：浏览器打开 slide-01-封面.html，用左右键翻页
-- 完整预览：浏览器打开 slides.html，用左右键翻页
+- 单页预览：浏览器打开 ppt/slide-01-封面.html，用左右键翻页
+- 完整预览：浏览器打开 ppt/slides.html，用左右键翻页
 
 如需调整：
-- "第3页标题改为..." → 我直接修改 slide-03.html
+- "第3页标题改为..." → 我直接修改 ppt/slide-03.html
 - "数据页的图表换成饼图" → 修改对应单页文件
-- "增加一页关于XX的内容" → 生成新的 slide-XX.html
+- "增加一页关于XX的内容" → 生成新的 ppt/slide-XX.html
 
-修改后重新运行 node merge.js 合并。
+修改后重新运行 cd ppt && node merge.js 合并。
 ```
 
 ### Step 5: 转换为 PPTX
 
-用户确认 slides.html 效果满意后：
+用户确认 ppt/slides.html 效果满意后：
 
 ```bash
-node scripts/generate_pptx.js
+cd ppt && node ../scripts/generate_pptx.js
 ```
 
 脚本自动：
-1. 读取 `slides.html`（合并版），解析所有 `.slide` 元素
+1. 读取 `ppt/slides.html`（合并版），解析所有 `.slide` 元素
 2. 提取每页的标题、正文、配色
-3. 用 pptxgenjs 生成 `演示文稿.pptx`
+3. 用 pptxgenjs 生成 `ppt/演示文稿.pptx`
 
 **转换原则**：
 - 保持 HTML 中的布局意图（左右分栏、大标题等）
@@ -237,7 +268,8 @@ node scripts/generate_pptx.js
 
 ```
 --- BID-PPT COMPLETE ---
-输出文件: {slides.html, 演示文稿.pptx}
+输出目录: ppt/
+输出文件: {ppt/slides.html, ppt/演示文稿.pptx}
 幻灯片数: {N}
 设计风格: {风格名称}
 图表数: {N}

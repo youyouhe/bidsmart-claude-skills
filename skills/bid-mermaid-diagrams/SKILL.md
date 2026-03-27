@@ -12,12 +12,14 @@ description: >
 
 ## 依赖
 
-- Node.js（已安装）
-- @mermaid-js/mermaid-cli（通过 npx 自动安装）
+- Node.js（已预装）
+- @mermaid-js/mermaid-cli（已预装，禁止自行安装）
+- mermaid_render 工具（系统内置扩展，优先使用）
 
 ## 核心工具
 
-- 渲染脚本：`scripts/render.sh`
+- **mermaid_render**：系统内置工具，直接传入 Mermaid 代码和输出路径即可渲染，优先使用
+- 渲染脚本：`scripts/render.sh`（备用方案）
 - 主题配置：`scripts/mermaid.json`（蓝色专业主题，支持中文）
 
 ## 工作流程
@@ -104,22 +106,33 @@ bash scripts/render.sh input.mmd output.png 1400 2
 python3 scripts/watermark.py --auto-project-name diagram.png -o diagram.png
 ```
 
-### 5. 替换占位符
+### 5. 替换占位符并清理 ASCII 图
 
-将 markdown 中的占位符行替换为图片引用：
+将 markdown 中的占位符行替换为图片引用，**同时删除关联的 ASCII 代码块**：
 
 **替换前：**
 ```
+​```
+┌──────────┐
+│  系统A   │──→│  系统B   │
+└──────────┘
+​```
+
 【此处插入系统总体架构图】
 ```
 
-**替换后：**
+**替换后（ASCII 代码块已删除）：**
 ```
 ![系统总体架构图](diagram-系统总体架构图.png)
 ```
 
-**重要：保留 ASCII 图代码块。** 占位符替换后，其下方的 ASCII 代码块不删除——
-在 Word 排版时可以选择保留或删除，但在 markdown 阶段保留作为参考。
+**操作步骤：**
+1. 用 edit 工具将 `【此处插入XX图】` 替换为 `![XX图](diagrams/XX.png)`
+2. 找到占位符上方或下方紧邻的 ``` 代码块（ASCII 文本图），用 edit 工具将整个代码块删除
+3. 确认替换后文件中不存在重复的图表表达（一个 ASCII + 一个 PNG）
+
+**重要：删除 ASCII 图代码块。** 占位符替换为图片引用后，必须同时删除其上方或下方的 ASCII 代码块（``` 包裹的文本图）。
+ASCII 图仅用于生成 Mermaid 代码的参考，PNG 生成后已无用途，保留会导致文档中同时出现两个图（一个文字版、一个图片版），排版混乱。
 
 ### 6. 图片文件命名
 
