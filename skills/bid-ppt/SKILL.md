@@ -251,7 +251,11 @@ DM Sans, Outfit, Figtree, Epilogue
 6. **装饰色块**：面积至少占幻灯片 20%，允许出血超出边缘
 7. **标题允许压在色块上**，制造视觉张力
 8. **禁止对 h1/h2 使用 `transform: rotate`** — 会破坏文档流
-9. **内容区域高度不超过容器 85%**（预留边距，避免截断）
+9. **内容区域高度自适应**：
+   - ❌ 禁止对内容容器设置固定 `height: 60%` 等百分比高度
+   - ✅ 使用 `max-height: 85%` 或让容器自适应内容
+   - ✅ 对 `.slide` 设置 `padding` 预留边距，而非限制内容高度
+   - 原因：固定高度会截断超出内容，自适应高度确保所有内容可见
 
 #### 内容密度自适应
 
@@ -285,6 +289,36 @@ const spacing = {
 - 三级服务体系（9 项服务）→ medium 密度 → p 字号 1.1vw
 - 列表 15 项 → high 密度 → p 字号 0.9vw + 减少行间距
 
+**高度控制示例**：
+
+```css
+/* ❌ 错误：固定高度会截断内容 */
+.framework-container {
+  height: 60%;  /* 危险！内容可能被截断 */
+}
+
+/* ✅ 正确：自适应高度 */
+.framework-container {
+  width: 100%;
+  max-height: 75%;  /* 最大高度限制，但允许更小 */
+  display: flex;
+  gap: 40px;
+  /* 不设置固定 height，让内容自适应 */
+}
+
+/* ✅ 或者用 flex 布局自动分配空间 */
+.slide {
+  padding: 60px;  /* 通过 padding 控制边距 */
+  display: flex;
+  flex-direction: column;
+}
+.framework-container {
+  flex: 1;  /* 占据剩余空间 */
+  min-height: 0;  /* 允许收缩 */
+  overflow: visible;  /* 或 auto */
+}
+```
+
 #### 图表规则
 
 使用 Chart.js（从 cdnjs 加载）：
@@ -301,6 +335,26 @@ const spacing = {
 #### 代码质量
 
 JavaScript 中所有引号、尖括号必须保持原始字符，禁止 HTML 实体转义。
+
+#### 内容截断检查清单
+
+生成 HTML 后必须检查：
+
+1. **高度设置检查**：
+   - 搜索代码中的 `height: XX%`
+   - 如果对内容容器使用了固定百分比高度 → 改为 `max-height` 或删除
+
+2. **Overflow 检查**：
+   - `.slide` 必须保持 `overflow: hidden`（维持比例）
+   - 内容容器可以用 `overflow: visible` 或 `overflow: auto`
+
+3. **内容计数验证**：
+   - 9 项内容 → padding 60px + 字号 1.1vw
+   - 如果仍然截断 → 检查是否有固定高度限制
+
+4. **分栏布局注意**：
+   - 三栏布局时，每栏内容高度应相近
+   - 如果某栏明显更长 → 考虑重新分配内容或调整字号
 
 ### Step 4: 渲染 HTML 为 PNG
 
