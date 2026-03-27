@@ -1,5 +1,29 @@
 # bid-ppt 脚本
 
+## merge.js
+
+合并所有单页 HTML（`slide-*.html`）为一个完整的 `slides.html`。
+
+### 使用
+
+```bash
+node merge.js
+```
+
+### 工作原理
+
+1. 查找当前目录所有 `slide-*.html` 文件
+2. 按数字排序（01, 02, 03...）
+3. 从第一个文件提取 `<head>`（CSS 样式）
+4. 从每个文件提取 `<div class="slide">` 内容
+5. 合并为一个 HTML，添加键盘导航
+
+### 输出
+
+- `slides.html` — 合并后的完整幻灯片文件，用浏览器打开即可预览
+
+---
+
 ## generate_pptx.js
 
 将 `slides.html` 转换为 PPTX 文件。

@@ -66,9 +66,58 @@ N+2. 致谢/Q&A — 结语页
 - 数据用图表而非表格
 - 关键数字放大突出（视觉锚点）
 
-### Step 3: 生成 HTML 幻灯片
+### Step 3: 生成 HTML 幻灯片（单页模式）
 
-在工作目录生成 `slides.html`，这是一个完整独立的 HTML 文件。
+**重要**：为避免单次生成过大导致 token 超限，采用**单页独立文件**模式。
+
+#### 文件组织
+
+每张幻灯片生成一个独立的 HTML 文件：
+```
+slide-01-封面.html
+slide-02-目录.html
+slide-03-正文1.html
+...
+slide-N-致谢.html
+```
+
+#### 生成流程
+
+1. **第一步**：生成 `slide-01-封面.html`（包含完整 CSS 样式）
+2. **第二步**：逐个生成 `slide-02.html` 到 `slide-N.html`（复用相同样式）
+3. **第三步**：生成 `merge.js` 脚本，用于合并所有单页为 `slides.html`
+
+#### 单页 HTML 结构
+
+每个文件都是完整独立的 HTML（可单独在浏览器预览）：
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <style>/* 完整 CSS */</style>
+</head>
+<body>
+  <div class="slide">
+    <!-- 当前页内容 -->
+  </div>
+  <script>
+    // 左右键翻页（跳转到上/下一个文件）
+    document.addEventListener('keydown', e => {
+      if (e.key === 'ArrowLeft') location.href = 'slide-XX.html';
+      if (e.key === 'ArrowRight') location.href = 'slide-XX.html';
+    });
+  </script>
+</body>
+</html>
+```
+
+#### 合并脚本
+
+`merge.js` 读取所有 `slide-*.html`，提取 `<div class="slide">` 内容，合并为单文件：
+```javascript
+// 生成 slides.html，包含所有页
+// 用于最终预览和 PPTX 转换
+```
 
 **必须遵循的技术规范**：
 
@@ -143,35 +192,45 @@ DM Sans, Outfit, Figtree, Epilogue
 
 JavaScript 中所有引号、尖括号必须保持原始字符，禁止 HTML 实体转义。
 
-### Step 4: 预览与迭代
+### Step 4: 合并与预览
 
-生成 HTML 后告知用户：
+所有单页生成完成后：
+
+1. 运行 `node merge.js` 生成 `slides.html`（合并版）
+2. 告知用户：
 
 ```
-HTML 幻灯片已生成：slides.html
-请在浏览器中打开预览，使用左右箭头键翻页。
+✅ 已生成 N 个单页 HTML + 合并版 slides.html
+
+预览方式：
+- 单页预览：浏览器打开 slide-01-封面.html，用左右键翻页
+- 完整预览：浏览器打开 slides.html，用左右键翻页
 
 如需调整：
-- "第3页标题改为..."
-- "数据页的图表换成饼图"
-- "整体配色偏蓝一些"
-- "增加一页关于XX的内容"
-```
+- "第3页标题改为..." → 我直接修改 slide-03.html
+- "数据页的图表换成饼图" → 修改对应单页文件
+- "增加一页关于XX的内容" → 生成新的 slide-XX.html
 
-支持局部修改，不需要每次重新生成整个文件。
+修改后重新运行 node merge.js 合并。
+```
 
 ### Step 5: 转换为 PPTX
 
-用户确认 HTML 效果满意后，将 HTML 转换为 PPTX：
+用户确认 slides.html 效果满意后：
 
-1. 读取 `slides.html`，解析每张幻灯片的内容结构
-2. 使用 `scripts/generate_pptx.js` 生成 PPTX 文件
-3. 输出文件命名：`{标题}.pptx`
+```bash
+node scripts/generate_pptx.js
+```
+
+脚本自动：
+1. 读取 `slides.html`（合并版），解析所有 `.slide` 元素
+2. 提取每页的标题、正文、配色
+3. 用 pptxgenjs 生成 `演示文稿.pptx`
 
 **转换原则**：
 - 保持 HTML 中的布局意图（左右分栏、大标题等）
 - 文字全部可编辑（非图片）
-- 图表转为 PPTX 内嵌图表或高清图片
+- 图表转为占位框（需在 PowerPoint 中手动替换）
 - 配色保持一致
 
 ### Step 6: 输出状态
