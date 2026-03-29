@@ -2,12 +2,16 @@
 """
 上下文验证脚本
 
-验证当前对话是否在投标业务上下文中，决定是否允许学习
+验证当前对话是否在投标业务上下文中，决定是否允许学习。
+
+调用方式：
+  python3 validate_context.py --text "对话文本内容..."
 """
 
-import sys
+import argparse
 import json
-from typing import List, Dict
+import sys
+from typing import Dict, List
 
 
 BID_FILES = [
@@ -27,33 +31,22 @@ BID_KEYWORDS = [
 ]
 
 
-def validate_bid_context(conversation_text: str) -> Dict[str, any]:
-    """
-    验证当前对话是否在投标业务上下文中
-
-    返回: {
-        "is_valid": bool,
-        "score": int,  # 0-3
-        "reasons": List[str]
-    }
-    """
-    conversation_lower = conversation_text.lower()
+def validate_bid_context(conversation_text: str) -> Dict:
+    """验证当前对话是否在投标业务上下文中"""
     reasons = []
     score = 0
 
     # 检查1：是否涉及投标文件
-    has_bid_files = any(f in conversation_text for f in BID_FILES)
-    if has_bid_files:
+    matched_files = [f for f in BID_FILES if f in conversation_text]
+    if matched_files:
         score += 1
-        matched = [f for f in BID_FILES if f in conversation_text]
-        reasons.append(f"✅ 涉及投标文件：{', '.join(matched[:3])}")
+        reasons.append(f"✅ 涉及投标文件：{', '.join(matched_files[:3])}")
 
     # 检查2：是否调用了 bid-* skills
-    has_bid_skills = any(s in conversation_text for s in BID_SKILLS)
-    if has_bid_skills:
+    matched_skills = [s for s in BID_SKILLS if s in conversation_text]
+    if matched_skills:
         score += 1
-        matched = [s for s in BID_SKILLS if s in conversation_text]
-        reasons.append(f"✅ 调用了 bid skills：{', '.join(matched[:3])}")
+        reasons.append(f"✅ 调用了 bid skills：{', '.join(matched_skills[:3])}")
 
     # 检查3：话题是否相关
     keyword_count = sum(1 for kw in BID_KEYWORDS if kw in conversation_text)
@@ -61,9 +54,7 @@ def validate_bid_context(conversation_text: str) -> Dict[str, any]:
         score += 1
         reasons.append(f"✅ 投标关键词出现 {keyword_count} 次")
 
-    # 判断
     is_valid = score >= 2
-
     if not is_valid:
         reasons.append("❌ 不满足至少2项条件，拒绝学习")
 
@@ -74,18 +65,16 @@ def validate_bid_context(conversation_text: str) -> Dict[str, any]:
     }
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='验证投标业务上下文')
+    parser.add_argument('--text', required=True, help='对话上下文文本')
+    return parser.parse_args()
+
+
 def main():
-    if len(sys.argv) < 2:
-        print(json.dumps({
-            "is_valid": False,
-            "score": 0,
-            "reasons": ["❌ 未提供对话上下文"]
-        }, ensure_ascii=False, indent=2))
-        sys.exit(1)
+    args = parse_args()
 
-    conversation_text = sys.argv[1]
-    result = validate_bid_context(conversation_text)
-
+    result = validate_bid_context(args.text)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     sys.exit(0 if result["is_valid"] else 1)
 

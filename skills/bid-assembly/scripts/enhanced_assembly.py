@@ -12,6 +12,9 @@ from pathlib import Path
 import json
 from datetime import datetime
 
+# 从脚本自身位置推算兄弟脚本的绝对路径
+SCRIPT_DIR = str(Path(__file__).resolve().parent)
+
 
 def run_command(command, description):
     """运行命令并显示结果"""
@@ -65,7 +68,7 @@ def enhanced_assembly_workflow(project_dir):
 
     # ========== 第1步：文件规范化 ==========
     success, output = run_command(
-        f'python normalize_markdown.py "{resp_dir}"',
+        f'python3 "{SCRIPT_DIR}/normalize_markdown.py" "{resp_dir}"',
         "第1步：Markdown文件规范化"
     )
     results['steps'].append({
@@ -77,7 +80,7 @@ def enhanced_assembly_workflow(project_dir):
 
     # ========== 第2步：结构验证 ==========
     success, output = run_command(
-        f'python validate_structure.py "{resp_dir}"',
+        f'python3 "{SCRIPT_DIR}/validate_structure.py" "{resp_dir}"',
         "第2步：Markdown结构验证"
     )
     results['steps'].append({
@@ -99,7 +102,7 @@ def enhanced_assembly_workflow(project_dir):
         'Word文档待完善清单.md'
     ]
     success, output = run_command(
-        f'python detect_placeholders.py "{resp_dir}" {" ".join(exclude_files)}',
+        f'python3 "{SCRIPT_DIR}/detect_placeholders.py" "{resp_dir}" {" ".join(exclude_files)}',
         "第3步：占位符检测"
     )
     results['steps'].append({
@@ -109,20 +112,12 @@ def enhanced_assembly_workflow(project_dir):
         'output': output
     })
 
-    # ========== 第4步：生成Word文档 ==========
-    generate_docx_js = os.path.join(project_dir, "generate_docx.js")
-
-    if not os.path.exists(generate_docx_js):
-        print(f"\n⚠️  警告: 未找到 generate_docx.js")
-        print(f"   预期位置: {generate_docx_js}")
-        print(f"   跳过Word文档生成")
-        success = False
-        output = "generate_docx.js not found"
-    else:
-        success, output = run_command(
-            f'cd "{project_dir}" && node generate_docx.js',
-            "第4步：生成Word文档"
-        )
+    # ========== 第4步：生成Word文档（跳过，由 bid-md2doc 负责） ==========
+    print(f"\n{'='*60}")
+    print("第4步：Word文档生成（由 bid-md2doc skill 独立负责，此处跳过）")
+    print(f"{'='*60}")
+    success = True
+    output = "跳过（Word 生成由 bid-md2doc 独立执行）"
 
     results['steps'].append({
         'step': 4,
@@ -132,20 +127,18 @@ def enhanced_assembly_workflow(project_dir):
     })
 
     # ========== 第5步：Word文档后验证 ==========
-    # 查找生成的Word文档
     import glob
-    docx_files = glob.glob(os.path.join(resp_dir, "响应文件-*.docx"))
+    docx_files = glob.glob(os.path.join(resp_dir, "*.docx"))
 
     if not docx_files:
         print(f"\n⚠️  警告: 未找到生成的Word文档")
-        print(f"   搜索路径: {resp_dir}/响应文件-*.docx")
+        print(f"   搜索路径: {resp_dir}/*.docx")
         success = False
         output = "Word document not found"
     else:
-        # 取最新的文档
         latest_docx = max(docx_files, key=os.path.getmtime)
         success, output = run_command(
-            f'python verify_docx.py "{latest_docx}"',
+            f'python3 "{SCRIPT_DIR}/verify_docx.py" "{latest_docx}"',
             "第5步：Word文档后验证"
         )
 

@@ -34,7 +34,7 @@ npx --yes @mermaid-js/mermaid-cli \
     -c "$CONFIG" \
     -w "$WIDTH" \
     -s "$SCALE" \
-    -b transparent \
+    -b white \
     2>&1
 
 if [ -f "$OUTPUT" ]; then

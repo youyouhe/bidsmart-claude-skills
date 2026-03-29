@@ -2,13 +2,17 @@
 """
 Skill 识别脚本
 
-根据问题描述和上下文，识别应该将 gotcha 注入到哪个 bid-* skill
+根据问题描述和上下文，识别应该将 gotcha 注入到哪个 bid-* skill。
+
+调用方式：
+  python3 identify_skill.py --problem "评分标准提取错误"
+  python3 identify_skill.py --problem "评分标准提取错误" --context "分析报告中遗漏了..."
 """
 
-import sys
+import argparse
 import json
-from typing import List, Dict, Optional
-
+import sys
+from typing import Dict, List
 
 # Skill 映射规则
 SKILL_PATTERNS = {
@@ -55,16 +59,8 @@ SKILL_PATTERNS = {
 }
 
 
-def identify_target_skill(problem: str, context: str = '') -> Dict[str, any]:
-    """
-    识别问题应归属的 skill
-
-    返回: {
-        "skill": str,
-        "confidence": float,
-        "matched_patterns": List[str]
-    }
-    """
+def identify_target_skill(problem: str, context: str = '') -> Dict:
+    """识别问题应归属的 skill"""
     full_text = f"{problem} {context}".lower()
 
     scores = {}
@@ -73,12 +69,10 @@ def identify_target_skill(problem: str, context: str = '') -> Dict[str, any]:
     for skill, patterns in SKILL_PATTERNS.items():
         score = 0
         matches = []
-
         for pattern in patterns:
             if pattern in full_text:
                 score += 1
                 matches.append(pattern)
-
         if score > 0:
             scores[skill] = score
             matched_patterns[skill] = matches
@@ -91,11 +85,8 @@ def identify_target_skill(problem: str, context: str = '') -> Dict[str, any]:
             "message": "❌ 无法识别目标 skill，请手动指定"
         }
 
-    # 找到得分最高的 skill
     best_skill = max(scores, key=scores.get)
     max_score = scores[best_skill]
-
-    # 计算置信度
     total_patterns = len(SKILL_PATTERNS[best_skill])
     confidence = max_score / total_patterns
 
@@ -107,20 +98,17 @@ def identify_target_skill(problem: str, context: str = '') -> Dict[str, any]:
     }
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='识别问题归属的 bid skill')
+    parser.add_argument('--problem', required=True, help='问题描述')
+    parser.add_argument('--context', default='', help='额外上下文（可选）')
+    return parser.parse_args()
+
+
 def main():
-    if len(sys.argv) < 2:
-        print(json.dumps({
-            "skill": None,
-            "confidence": 0.0,
-            "matched_patterns": [],
-            "message": "❌ 未提供问题描述"
-        }, ensure_ascii=False, indent=2))
-        sys.exit(1)
+    args = parse_args()
 
-    problem = sys.argv[1]
-    context = sys.argv[2] if len(sys.argv) > 2 else ''
-
-    result = identify_target_skill(problem, context)
+    result = identify_target_skill(args.problem, args.context)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
     sys.exit(0 if result["skill"] else 1)

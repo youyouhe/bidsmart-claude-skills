@@ -24,17 +24,36 @@ const {
   PageNumber,
   NumberFormat,
 } = require('docx');
-const { Packer } = require('docx');
+const { Packer, LineRuleType } = require('docx');
 
-// === CONFIG START ===
-const CONFIG = {
-  inputDir: 'C:\\Users\\Administrator\\Documents\\bid\\TC261901F1\\响应文件',
-  outputFile: '响应文件-琪信通达-清华房屋土地数智化平台.docx',
-  headerText: '清华大学房屋土地数智化管理平台采购项目 响应文件',
-  footerCompany: '琪信通达（北京）科技有限公司',
-  excludeFiles: ['核对报告.md', '装订指南.md', '扫描件资料清单.md', '扫描件替换完成报告.md', '扫描件替换报告.md', '资料检索替换完成报告.md', '信息填写进度报告.md', 'Word文档待完善清单.md'],
-};
-// === CONFIG END ===
+// 正文样式：小四（12pt = 24半磅），1.5倍行距（360 twips）
+const BODY_FONT_SIZE = 24;  // 小四号 = 12pt, docx size 单位为半磅
+const BODY_LINE_SPACING = { line: 360, lineRule: LineRuleType.AUTO };
+
+// === CONFIG ===
+// 优先从命令行 JSON 参数读取，其次从环境变量读取，最后用默认值
+const DEFAULT_EXCLUDE = ['核对报告.md', '装订指南.md', '扫描件资料清单.md', '扫描件替换完成报告.md', '扫描件替换报告.md', '资料检索替换完成报告.md', '信息填写进度报告.md', 'Word文档待完善清单.md'];
+
+let CONFIG;
+if (process.argv[2]) {
+  // 用法: node generate_docx.js '{"inputDir":"...","outputFile":"...","headerText":"...","footerCompany":"..."}'
+  const arg = JSON.parse(process.argv[2]);
+  CONFIG = {
+    inputDir: arg.inputDir,
+    outputFile: arg.outputFile || 'output.docx',
+    headerText: arg.headerText || '',
+    footerCompany: arg.footerCompany || '',
+    excludeFiles: arg.excludeFiles || DEFAULT_EXCLUDE,
+  };
+} else {
+  CONFIG = {
+    inputDir: process.env.DOCX_INPUT_DIR || '响应文件',
+    outputFile: process.env.DOCX_OUTPUT_FILE || 'output.docx',
+    headerText: process.env.DOCX_HEADER || '',
+    footerCompany: process.env.DOCX_FOOTER || '',
+    excludeFiles: DEFAULT_EXCLUDE,
+  };
+}
 
 // 读取所有.md文件
 function getMdFiles(dir) {
@@ -71,6 +90,32 @@ function getHeadingLevel(line) {
   return { level: levelMap[level], text };
 }
 
+// 判断是否为表格分隔行（|---|---|）
+function isSeparatorRow(line) {
+  return /^\|[\s:-]+(\|[\s:-]+)*\|$/.test(line.trim());
+}
+
+// 解析管道分隔的单元格（保留空单元格）
+function splitTableRow(line) {
+  // 去掉首尾的 |，再按 | 分割
+  const inner = line.trim().replace(/^\||\|$/g, '');
+  return inner.split('|').map(cell => cell.trim());
+}
+
+// 解析单元格内的粗体文本
+function parseCellContent(text) {
+  const parts = text.split(/(\*\*.*?\*\*)/);
+  const children = parts
+    .filter(part => part.length > 0)
+    .map(part => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return new TextRun({ text: part.slice(2, -2), bold: true, size: BODY_FONT_SIZE });
+      }
+      return new TextRun({ text: part, size: BODY_FONT_SIZE });
+    });
+  return children.length > 0 ? children : [new TextRun({ text, size: BODY_FONT_SIZE })];
+}
+
 // 解析Markdown表格
 function parseTable(lines, startIdx) {
   const tableLines = [];
@@ -79,29 +124,36 @@ function parseTable(lines, startIdx) {
   // 跳过空行
   while (idx < lines.length && lines[idx].trim() === '') idx++;
 
-  // 读取表格行
-  while (idx < lines.length && lines[idx].includes('|')) {
+  // 读取表格行（以 | 开头和结尾）
+  while (idx < lines.length) {
     const line = lines[idx].trim();
     if (line.startsWith('|') && line.endsWith('|')) {
       tableLines.push(line);
+      idx++;
+    } else {
+      break;
     }
-    idx++;
   }
 
   if (tableLines.length < 2) return { table: null, nextIdx: startIdx + 1 };
 
-  // 解析表头
-  const headers = tableLines[0]
-    .split('|')
-    .filter(cell => cell.trim())
-    .map(cell => cell.trim());
+  // 解析表头（第一行）
+  const headers = splitTableRow(tableLines[0]);
+  const colCount = headers.length;
 
-  // 跳过分隔行
-  const rows = tableLines.slice(2).map(line =>
-    line.split('|')
-      .filter(cell => cell.trim())
-      .map(cell => cell.trim())
-  );
+  // 过滤掉分隔行，收集数据行
+  const rows = [];
+  for (let r = 1; r < tableLines.length; r++) {
+    if (isSeparatorRow(tableLines[r])) continue;
+    let cells = splitTableRow(tableLines[r]);
+    // 归一化列数：不足补空，多余截断
+    if (cells.length < colCount) {
+      cells = cells.concat(Array(colCount - cells.length).fill(''));
+    } else if (cells.length > colCount) {
+      cells = cells.slice(0, colCount);
+    }
+    rows.push(cells);
+  }
 
   // 创建Word表格
   const tableRows = [
@@ -109,7 +161,7 @@ function parseTable(lines, startIdx) {
     new TableRow({
       children: headers.map(header =>
         new TableCell({
-          children: [new Paragraph({ text: header, bold: true })],
+          children: [new Paragraph({ children: parseCellContent(header), spacing: BODY_LINE_SPACING })],
           shading: { fill: 'E0E0E0' },
         })
       ),
@@ -119,7 +171,7 @@ function parseTable(lines, startIdx) {
       new TableRow({
         children: row.map(cell =>
           new TableCell({
-            children: [new Paragraph({ text: cell })],
+            children: [new Paragraph({ children: parseCellContent(cell), spacing: BODY_LINE_SPACING })],
           })
         ),
       })
@@ -189,14 +241,22 @@ function parseImage(line, baseDir) {
 function parseMdContent(filePath) {
   let content = fs.readFileSync(filePath, 'utf-8');
 
-  // 清理 &nbsp; 文本（LLM 生成时产生的格式问题）
+  // 将 &nbsp; 独占一行（封面留白）转换为空段落标记，保留留白效果
+  // 先把 &nbsp; 独占行标记为特殊占位，避免后续被清理掉
+  content = content.replace(/^\s*&nbsp;\s*$/gm, '%%BLANK_LINE%%');
+  // 其余 &nbsp;（行内出现的）替换为普通空格
   content = content
-    .replace(/&nbsp;/g, ' ')        // 替换为普通空格
-    .replace(/\s{2,}/g, ' ');       // 多个连续空格替换为单个
+    .replace(/&nbsp;/g, ' ')
+    .replace(/[^\S\n]{2,}/g, ' ');  // 多个连续空格替换为单个（保留换行符）
 
   // 移除所有 HTML 注释（包括单行和多行）
-  // 匹配 <!-- ... --> 格式，支持跨行
   content = content.replace(/<!--[\s\S]*?-->/g, '');
+
+  // 清理 bwrap 沙箱泄漏的 shell 命令（heredoc EOF 后注入的配额检查）
+  content = content.replace(/\nEOF;[^\n]*$/s, '');
+
+  // 容错处理：---# 连写（分隔线紧跟标题，缺少换行）拆分为两行
+  content = content.replace(/^([-*_]{3,})#/gm, '$1\n#');
 
   // 处理CRLF和LF混合的换行符，并去除每行末尾的\r
   const lines = content.split(/\r?\n/);
@@ -213,8 +273,21 @@ function parseMdContent(filePath) {
       continue;
     }
 
-    // 分隔线
+    // 封面留白行（由 &nbsp; 转换而来）→ 生成空段落保留间距
+    if (line.trim() === '%%BLANK_LINE%%') {
+      elements.push(new Paragraph({
+        children: [],
+        spacing: BODY_LINE_SPACING,
+      }));
+      i++;
+      continue;
+    }
+
+    // 分隔线 → 转换为分页符（封面/章节分隔）
     if (line.trim().match(/^[-*_]{3,}$/)) {
+      elements.push(new Paragraph({
+        children: [new PageBreak()],
+      }));
       i++;
       continue;
     }
@@ -280,8 +353,9 @@ function parseMdContent(filePath) {
 
       elements.push(
         new Paragraph({
-          children: [new TextRun({ text: codeLines.join('\n'), font: 'Consolas' })],
+          children: [new TextRun({ text: codeLines.join('\n'), font: 'Consolas', size: BODY_FONT_SIZE })],
           shading: { fill: 'F5F5F5' },
+          spacing: BODY_LINE_SPACING,
         })
       );
       continue;
@@ -327,9 +401,9 @@ function parseMdContent(filePath) {
         .filter(part => part.length > 0) // 先过滤空字符串
         .map(part => {
           if (part.startsWith('**') && part.endsWith('**')) {
-            return new TextRun({ text: part.slice(2, -2), bold: true });
+            return new TextRun({ text: part.slice(2, -2), bold: true, size: BODY_FONT_SIZE });
           }
-          return new TextRun({ text: part });
+          return new TextRun({ text: part, size: BODY_FONT_SIZE });
         });
 
       // 只有当children不为空时才添加段落
@@ -338,6 +412,7 @@ function parseMdContent(filePath) {
           new Paragraph({
             children: children,
             bullet: { level: 0 },
+            spacing: BODY_LINE_SPACING,
           })
         );
       }
@@ -355,13 +430,13 @@ function parseMdContent(filePath) {
         .filter(part => part.length > 0) // 过滤空字符串
         .map(part => {
           if (part.startsWith('**') && part.endsWith('**')) {
-            return new TextRun({ text: part.slice(2, -2), bold: true });
+            return new TextRun({ text: part.slice(2, -2), bold: true, size: BODY_FONT_SIZE });
           }
-          return new TextRun({ text: part });
+          return new TextRun({ text: part, size: BODY_FONT_SIZE });
         });
 
       if (children.length > 0) {
-        elements.push(new Paragraph({ children }));
+        elements.push(new Paragraph({ children, spacing: BODY_LINE_SPACING }));
       }
     }
 
@@ -482,8 +557,10 @@ async function generateDocx() {
     ],
   });
 
-  // 保存文档
-  const outputPath = path.join(CONFIG.inputDir, CONFIG.outputFile);
+  // 保存文档（outputFile 可以是绝对路径或相对于 inputDir 的相对路径）
+  const outputPath = path.isAbsolute(CONFIG.outputFile)
+    ? CONFIG.outputFile
+    : path.join(CONFIG.inputDir, CONFIG.outputFile);
   const buffer = await Packer.toBuffer(doc);
   fs.writeFileSync(outputPath, buffer);
 

@@ -3,7 +3,7 @@ name: bid-md2doc
 description: >
   将 响应文件/ 目录下的 Markdown 文件转换为格式化的 Word (.docx) 文档。
   自动从分析报告和商务文件中读取项目名称、公司名称等信息，
-  编辑 generate_docx.js 的 CONFIG 区域，然后运行脚本生成 Word 文件。
+  通过命令行参数调用 generate_docx.js 脚本生成 Word 文件。
   当用户要求生成Word文档、转换MD为docx、导出响应文件时触发。
   前置条件：响应文件/ 目录下已有编写完成的 .md 文件。
 ---
@@ -59,68 +59,50 @@ description: >
 - **单册模式**：分析报告未提及册别结构或标注"单册" → 生成一个 Word 文件
 - **多册模式**：分析报告指定了多册结构 → 每册生成一个独立 Word 文件
 
-### 2. 编辑 generate_docx.js 配置
+### 2. 运行生成脚本
 
-编辑工作目录下 `generate_docx.js` 顶部的 CONFIG 区域（位于 `// === CONFIG START ===` 和 `// === CONFIG END ===` 之间）。
+**⚠️ 重要：不要复制脚本到工作目录！直接通过命令行参数调用原始脚本。**
+
+脚本路径固定为：`/mnt/oldroot/home/bird/xyy/smartbid-platform/packages/bidsmart-skills/skills/bid-md2doc/scripts/generate_docx.js`
+
+通过 JSON 参数传入配置：
+
+```bash
+node /mnt/oldroot/home/bird/xyy/smartbid-platform/packages/bidsmart-skills/skills/bid-md2doc/scripts/generate_docx.js '{
+  "inputDir": "{工作目录}/响应文件",
+  "outputFile": "响应文件-{公司简称}-{项目简称}.docx",
+  "headerText": "{项目全称} 响应文件",
+  "footerCompany": "{公司全称}"
+}'
+```
 
 #### 2.1 单册模式
 
-```javascript
-const CONFIG = {
-  inputDir: '{工作目录}/响应文件',
-  outputFile: '响应文件-{公司简称}-{项目简称}.docx',
-  headerText: '{项目全称} 响应文件',
-  footerCompany: '{公司全称}',
-  excludeFiles: ['核对报告.md', '装订指南.md'],
-};
+一次调用，不指定 `excludeFiles`（使用默认排除列表）：
+
+```bash
+node {脚本路径} '{"inputDir":"{workDir}/响应文件","outputFile":"响应文件-{公司简称}-{项目简称}.docx","headerText":"{项目全称} 响应文件","footerCompany":"{公司全称}"}'
 ```
 
 #### 2.2 多册模式
 
-多册模式需要**多次运行** generate_docx.js，每次使用不同的 CONFIG：
-- 每册通过 `excludeFiles` 排除不属于该册的文件，或通过 `includeFiles` 仅包含该册的文件
-- 每册的 `outputFile` 和 `headerText` 使用该册的名称
-
-推荐方式：创建 `generate_both.js`（或 `generate_all.js`）包装脚本，自动修改 CONFIG 并多次调用 generate_docx.js：
-
-```javascript
-// 第一册：资格证明文件
-const config1 = {
-  inputDir: '{工作目录}/响应文件',
-  outputFile: '投标文件（资格证明文件）-{公司简称}.docx',
-  headerText: '{采购编号} 投标文件（资格证明文件）',
-  footerCompany: '{公司全称}',
-  excludeFiles: ['核对报告.md', '装订指南.md', /* 第二册的文件 */],
-  includeFiles: ['00-资格证明文件.md'],  // 仅包含第一册文件
-};
-
-// 第二册：商务技术文件
-const config2 = {
-  inputDir: '{工作目录}/响应文件',
-  outputFile: '投标文件（商务技术文件）-{公司简称}.docx',
-  headerText: '{采购编号} 投标文件（商务技术文件）',
-  footerCompany: '{公司全称}',
-  excludeFiles: ['核对报告.md', '装订指南.md', '00-资格证明文件.md'],
-};
-```
-
-字段填写规则：
-- `inputDir`：保持为 `响应文件/` 的绝对路径
-- `outputFile`：单册时为 `响应文件-{公司简称}-{项目简称}.docx`；多册时为 `投标文件（{册别名称}）-{公司简称}.docx`
-- `headerText`：单册时为 `{项目全称} 响应文件`；多册时为 `{采购编号} 投标文件（{册别名称}）`
-- `footerCompany`：公司全称
-- `excludeFiles`：固定排除 `核对报告.md` 和 `装订指南.md`，多册时还需排除其他册的文件
-- `includeFiles`：可选，如指定则仅处理列出的文件（优先于 excludeFiles）
-
-### 3. 运行生成脚本
+多次调用，每次传不同参数：
 
 ```bash
-# 单册模式
-cd {工作目录} && node generate_docx.js
+# 第一册：资格证明文件
+node {脚本路径} '{"inputDir":"{workDir}/响应文件","outputFile":"投标文件（资格证明文件）-投标人.docx","headerText":"{采购编号} 投标文件（资格证明文件）","footerCompany":"{公司全称}","includeFiles":["00-资格证明文件.md"]}'
 
-# 多册模式
-cd {工作目录} && node generate_both.js
+# 第二册：商务技术文件
+node {脚本路径} '{"inputDir":"{workDir}/响应文件","outputFile":"投标文件（商务技术文件）-投标人.docx","headerText":"{采购编号} 投标文件（商务技术文件）","footerCompany":"{公司全称}","excludeFiles":["核对报告.md","装订指南.md","00-资格证明文件.md"]}'
 ```
+
+字段说明：
+- `inputDir`：`响应文件/` 的绝对路径
+- `outputFile`：输出文件名
+- `headerText`：页眉文字
+- `footerCompany`：页脚公司名
+- `excludeFiles`：排除的文件列表（可选，有默认值）
+- `includeFiles`：仅包含的文件列表（可选，优先于 excludeFiles）
 
 ### 4. 报告生成结果
 
@@ -180,7 +162,7 @@ generate_docx.js 支持 Markdown 图片语法 `![alt](file.png)`：
 
 - 运行前确认 `响应文件/` 目录存在且有 .md 文件
 - 确认 `docx` npm 包已安装（`node_modules/docx`）
-- CONFIG 编辑仅修改 `CONFIG START` 和 `CONFIG END` 之间的内容，不改动其他代码
+- CONFIG 通过命令行 JSON 参数传入，不要复制或编辑脚本文件
 - 如果生成失败，检查控制台错误信息并修复（常见：图片路径错误、特殊字符导致表格解析失败）
 - **Word 文件被占用时写入会失败**（EBUSY 错误）：生成前确保目标 .docx 文件未在 Word 中打开
 

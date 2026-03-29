@@ -2,14 +2,18 @@
 """
 自检脚本 - 检测作用域漂移
 
-定期扫描所有 bid-* skills 的 gotchas.md，检测是否有非投标业务的经验混入
+扫描所有 bid-* skills 的 gotchas.md，检测是否有非投标业务的经验混入。
+
+调用方式：
+  python3 self_check.py --skills-root /path/to/skills
+  python3 self_check.py  （默认从脚本位置推算 skills 根目录）
 """
 
-import os
-import sys
+import argparse
 import json
+import sys
 from pathlib import Path
-from typing import List, Dict
+from typing import Dict, List
 
 
 BID_KEYWORDS = [
@@ -27,17 +31,20 @@ NON_BID_KEYWORDS = [
 ]
 
 
-def scan_gotchas(skills_root: str = '~/.claude/skills') -> Dict[str, any]:
+def get_default_skills_root() -> str:
+    """从脚本自身位置推算 skills 根目录：scripts/ -> bid-learner/ -> skills/"""
+    script_dir = Path(__file__).resolve().parent
+    return str(script_dir.parent.parent)
+
+
+def scan_gotchas(skills_root: str) -> Dict:
     """
     扫描所有 bid-* skills 的 gotchas.md，检测作用域漂移
-
-    返回: {
-        "suspicious": List[Dict],  # 可疑条目
-        "clean": int,  # 正常条目数
-        "total_skills": int
-    }
     """
-    skills_root = Path(skills_root).expanduser()
+    skills_root = Path(skills_root)
+    if not skills_root.exists():
+        return {"suspicious": [], "clean": 0, "total_skills": 0, "error": f"目录不存在: {skills_root}"}
+
     bid_skills = [d for d in skills_root.iterdir() if d.is_dir() and d.name.startswith('bid-')]
 
     suspicious_items = []
@@ -52,19 +59,14 @@ def scan_gotchas(skills_root: str = '~/.claude/skills') -> Dict[str, any]:
         with open(gotcha_file, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        # 按 ### 分割为独立 gotcha 条目
         sections = content.split('### ')
 
-        for i, section in enumerate(sections[1:], start=1):  # 跳过第一个空段
+        for i, section in enumerate(sections[1:], start=1):
             section_lower = section.lower()
 
-            # 检查投标关键词
             has_bid_context = any(kw in section for kw in BID_KEYWORDS)
-
-            # 检查非投标关键词
             non_bid_matches = [kw for kw in NON_BID_KEYWORDS if kw in section_lower]
 
-            # 可疑条件：有非投标关键词 且 缺乏投标上下文
             if non_bid_matches and not has_bid_context:
                 title = section.split('\n')[0].strip()
                 suspicious_items.append({
@@ -113,19 +115,26 @@ def format_report(result: Dict) -> str:
         lines.append("✅ 未检测到作用域漂移，所有 gotchas 均属于投标业务范畴")
 
     lines.append("=" * 60)
-
     return '\n'.join(lines)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Bid-Learner 作用域自检')
+    parser.add_argument('--skills-root', default=None,
+                        help='skills 根目录（默认从脚本位置推算）')
+    return parser.parse_args()
+
+
 def main():
-    skills_root = sys.argv[1] if len(sys.argv) > 1 else '~/.claude/skills'
+    args = parse_args()
+    skills_root = args.skills_root or get_default_skills_root()
 
     result = scan_gotchas(skills_root)
 
-    # 输出 JSON（供程序调用）
+    # JSON 输出到 stdout
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
-    # 输出可读报告（供人阅读）
+    # 可读报告输出到 stderr
     print("\n", file=sys.stderr)
     print(format_report(result), file=sys.stderr)
 

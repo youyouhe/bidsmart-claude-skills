@@ -283,6 +283,30 @@ EOF
 - [ ] ...
 ```
 
+## 辅助工具脚本（可选）
+
+**⚠️ 重要：不要复制脚本到工作目录！直接通过绝对路径调用。**
+
+脚本基础路径（固定）：
+```
+SCRIPTS=/mnt/oldroot/home/bird/xyy/smartbid-platform/packages/bidsmart-skills/skills/bid-assembly/scripts
+```
+
+以下脚本可在质检过程中按需使用，不是必须的（LLM 可独立完成大部分质检工作）：
+
+| 脚本 | 功能 | 调用方式 |
+|------|------|---------|
+| `normalize_markdown.py` | MD 文件规范化（BOM/换行/缩进） | `python3 $SCRIPTS/normalize_markdown.py "{workDir}/响应文件"` |
+| `validate_structure.py` | MD 结构验证（标题层级/表格） | `python3 $SCRIPTS/validate_structure.py "{workDir}/响应文件"` |
+| `detect_placeholders.py` | 占位符检测 | `python3 $SCRIPTS/detect_placeholders.py "{workDir}/响应文件" 核对报告.md 装订指南.md` |
+| `verify_docx.py` | Word 文档后验证 | `python3 $SCRIPTS/verify_docx.py "{workDir}/响应文件/output.docx"` |
+| `enhanced_assembly.py` | 一键运行全部检查 | `python3 $SCRIPTS/enhanced_assembly.py "{workDir}"` |
+
+**使用建议**：
+- 质检主流程由 LLM 按上述工作流程独立完成（读文件、逐项核对、写报告）
+- 辅助脚本可在写完核对报告后运行，作为二次验证
+- `detect_placeholders.py` 特别有用：可自动扫描所有占位符模式
+
 ## 检查方法论（通用）
 
 ### 覆盖率优先于内容质量
