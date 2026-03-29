@@ -187,7 +187,17 @@ function parseImage(line, baseDir) {
 
 // 解析Markdown内容
 function parseMdContent(filePath) {
-  const content = fs.readFileSync(filePath, 'utf-8');
+  let content = fs.readFileSync(filePath, 'utf-8');
+
+  // 清理 &nbsp; 文本（LLM 生成时产生的格式问题）
+  content = content
+    .replace(/&nbsp;/g, ' ')        // 替换为普通空格
+    .replace(/\s{2,}/g, ' ');       // 多个连续空格替换为单个
+
+  // 移除所有 HTML 注释（包括单行和多行）
+  // 匹配 <!-- ... --> 格式，支持跨行
+  content = content.replace(/<!--[\s\S]*?-->/g, '');
+
   // 处理CRLF和LF混合的换行符，并去除每行末尾的\r
   const lines = content.split(/\r?\n/);
   const elements = [];
@@ -199,12 +209,6 @@ function parseMdContent(filePath) {
 
     // 空行
     if (line.trim() === '') {
-      i++;
-      continue;
-    }
-
-    // HTML注释（辅助信息）
-    if (line.trim().match(/^<!--.*-->$/)) {
       i++;
       continue;
     }
