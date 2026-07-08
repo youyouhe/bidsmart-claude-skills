@@ -331,6 +331,28 @@ All skills are designed for **Chinese government procurement** with:
 - Compliance with Chinese procurement regulations
 - Support for common Chinese document structures (Word, PDF)
 
+## 🛠️ Tools & Utilities
+
+### DocScan — Word to PDF + Markdown Conversion API
+
+A standalone FastAPI service that converts `.docx` documents to PDF and extracts per-page Markdown (including tables).
+
+```bash
+git clone --recursive https://github.com/youyouhe/bidsmart-claude-skills.git
+cd bidsmart-claude-skills/docscan
+pip install fastapi uvicorn python-multipart pymupdf python-docx
+./start.sh
+```
+
+| Endpoint | Description |
+|---|---|
+| `POST /api/convert` | Upload .docx → returns PDF URL + per-page Markdown |
+| `GET /api/pdf/{id}` | Download converted PDF |
+| `GET /api/md/{id}/{page}` | Get Markdown for a specific page |
+| `GET /api/docs` | Swagger UI |
+
+Powered by ONLYOFFICE Document Server (Docker) for high-fidelity rendering with Chinese font support. See [docscan/README.md](docscan/README.md) for details.
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit issues or pull requests.

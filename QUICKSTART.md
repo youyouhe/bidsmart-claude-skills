@@ -266,4 +266,34 @@ export LANG=zh_CN.UTF-8
 
 ---
 
+## 🛠️ DocScan — Word 文档转换工具
+
+将 `.docx` 转换为 PDF（保留排版/字体/表格）并提取逐页 Markdown。
+
+```bash
+cd docscan
+pip install fastapi uvicorn python-multipart pymupdf python-docx
+./start.sh        # 首次自动拉取 ONLYOFFICE，启动 API
+./start.sh 8080   # 指定端口
+```
+
+启动后访问 Swagger: http://localhost:8800/api/docs
+
+**核心 API：**
+
+```bash
+# 上传 Word → 获取 PDF + Markdown
+curl -X POST http://localhost:8800/api/convert -F "file=@tender.docx"
+
+# 下载 PDF
+curl http://localhost:8800/api/pdf/{id} -o output.pdf
+
+# 获取单页 Markdown（含表格）
+curl http://localhost:8800/api/md/{id}/40
+```
+
+详细文档：[docscan/README.md](docscan/README.md)
+
+---
+
 Happy bidding! 🎯
