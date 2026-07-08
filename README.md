@@ -340,7 +340,7 @@ A standalone FastAPI service that converts `.docx` documents to PDF and extracts
 ```bash
 git clone --recursive https://github.com/youyouhe/bidsmart-claude-skills.git
 cd bidsmart-claude-skills/docscan
-pip install fastapi uvicorn python-multipart pymupdf python-docx
+pip install -r requirements.txt
 ./start.sh
 ```
 

@@ -272,7 +272,7 @@ export LANG=zh_CN.UTF-8
 
 ```bash
 cd docscan
-pip install fastapi uvicorn python-multipart pymupdf python-docx
+pip install -r requirements.txt
 ./start.sh        # 首次自动拉取 ONLYOFFICE，启动 API
 ./start.sh 8080   # 指定端口
 ```
