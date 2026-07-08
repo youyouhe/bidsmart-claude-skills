@@ -1,0 +1,3 @@
+[submodule "docscan"]
+	path = docscan
+	url = git@github.com:youyouhe/docscan.git
