@@ -137,6 +137,18 @@ git push origin v1.0.0
 - **Quality report**: `核对报告.md` in `响应文件/`, excluded from final Word output
 - **Diagrams**: Named `diagram-N.png` where N is sequential
 
+### Word Processing Strategy
+
+**Priority**: Always prefer Word (.docx) over PDF when both available. Word provides exact text extraction, structured table data, and no OCR errors.
+
+**DocScan Service (Primary)**: `http://localhost:8801` — converts `.docx` to per-page Markdown server-side.
+
+**Workflow**:
+1. `GET /api/health` — check if service is online
+2. `POST /api/convert` (multipart `file=@path.docx`) → returns `fid` string
+3. `GET /api/md/{fid}` → full-document Markdown with tables
+4. Fallback if offline: use `python-docx` to extract paragraphs and tables directly
+
 ### PDF Processing Strategy
 
 **Priority**: Always prefer Word (.docx) over PDF when both available. Word provides:
@@ -281,6 +293,7 @@ Skills in the pipeline communicate via:
 - Mermaid CLI - Diagram rendering
 
 **Optional Services**:
+- DocScan Word conversion service: `http://localhost:8801` (preferred for `.docx` reading; falls back to `python-docx` if offline)
 - OCR service endpoint (configure via `OCR_SERVICE_URL`)
 
 ## Common Issues
