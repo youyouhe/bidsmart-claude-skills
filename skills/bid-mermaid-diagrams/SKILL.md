@@ -6,6 +6,8 @@ description: >
   Mermaid 代码块直接渲染（上游 bid-tech-proposal 已按规范编写好代码），
   兼容处理旧格式的 ASCII 图转换，渲染为高清 PNG，
   然后替换占位符为 markdown 图片引用。
+  架构类图表（系统架构图/总体架构图/部署架构图/拓扑图）默认改用内置的 archify 渲染引擎，
+  效果更专业；流程图/组织架构图/甘特图/ER图仍走 Mermaid+mmdc 路径。
   当用户要求画图、生成图表、替换图表占位符、为技术方案/实施方案画架构图时触发。
 ---
 
@@ -18,12 +20,14 @@ description: >
 - Node.js（已预装）
 - @mermaid-js/mermaid-cli（已预装，禁止自行安装）
 - mermaid_render 工具（系统内置扩展，优先使用）
+- archify（`scripts/archify/`，已随本 skill 内置，无需安装，架构类图表的可选渲染后端）
 
 ## 核心工具
 
-- **mermaid_render**：系统内置工具，直接传入 Mermaid 代码和输出路径即可渲染，优先使用
-- 渲染脚本：`scripts/render.sh`（备用方案）
+- **mermaid_render**：系统内置工具，直接传入 Mermaid 代码和输出路径即可渲染，优先使用（流程图/组织架构图/甘特图/ER图走这条路径）
+- 渲染脚本：`scripts/render.sh`（备用方案，Mermaid+mmdc 路径）
 - 主题配置：`scripts/mermaid.json`（蓝色专业主题，支持中文）
+- **archify 渲染脚本**：`scripts/render_archify.mjs`（架构类图表默认走这条路径，见步骤 3.5）
 
 ## 工作流程
 
@@ -105,7 +109,47 @@ grep -rl "【此处插入.*图】" 响应文件/*.md 2>/dev/null
 6. **erDiagram 关系**：`PATIENT ||--o{ NURSING_RECORD : has`
 7. **节点文字过长时换行**：在引号标签中换行无效，应缩短文字或拆分节点
 
-### 4. 渲染为 PNG
+### 3.5 架构类图表：改用 archify 渲染（默认路径）
+
+当占位符内容属于**架构类**（系统总体架构图、总体架构图、部署架构图、拓扑图、对接/集成架构图——即上表中判定为 `graph TD`/`graph LR` 且描述的是组件/服务/基础设施关系而非流程步骤的图）时，默认改用内置的 archify 渲染引擎代替 mmdc，效果更专业（原生 4× 高清栅格化、CJK 文字宽度自动测量、深浅色主题一致）。
+
+**判定规则**：
+- 占位符文字含"架构""拓扑""部署图""集成架构"→ 走 archify
+- 占位符文字含"流程""组织架构""甘特""ER图""方法论示意"→ 仍走 3./4. 的 Mermaid+mmdc 路径，不受本节影响
+- 拿不准时，看图表描述的是"静态组件关系"（archify）还是"动作/时序/层级隶属"（Mermaid）
+
+**步骤（替代步骤3/4，仅用于架构类图表）：**
+
+1. **不编写 `.mmd` 文件**，改为编写 archify 的 JSON IR 文件 `{描述}.architecture.json`。字段结构（对照 `scripts/archify/schemas/architecture.schema.json` 和 `scripts/archify/examples/web-app.architecture.json`）：
+   ```json
+   {
+     "schema_version": 1,
+     "diagram_type": "architecture",
+     "meta": { "title": "系统总体架构", "subtitle": "..." },
+     "components": [
+       { "id": "web", "type": "frontend", "label": "Web前端", "pos": [60, 60], "size": [140, 60] },
+       { "id": "api", "type": "backend", "label": "业务服务", "pos": [280, 60], "size": [140, 60] }
+     ],
+     "connections": [
+       { "from": "web", "to": "api", "label": "HTTP调用" }
+     ],
+     "boundaries": [],
+     "cards": []
+   }
+   ```
+   - `type` 只能是 `frontend`/`backend`/`database`/`cloud`/`security`/`messagebus`/`external` 之一，按组件实际角色选取
+   - 节点文字（`label`/`title`）直接用中文，无需像 Mermaid 那样英文ID+中文标签分离——`id` 仍必须是英文（Schema 约束），但 `label` 用中文
+   - 与 3.节相同的**忠实原则**依然适用：结构、节点、层级来自占位符前后已有的 Mermaid 代码块/ASCII 图/文字描述，不得凭空编造
+   - 若占位符后已有旧格式的 Mermaid `graph`/ASCII 图，将其结构忠实转译为 archify 的 `components`/`connections`——转译时你需要重新判断节点的视觉布局（`pos`/`size`）和分组方式，但不得改变原图定义的节点集合、层级归属、连接关系
+2. **渲染**：
+   ```bash
+   node scripts/render_archify.mjs architecture input.architecture.json output.png
+   ```
+   脚本内部会：调用 archify 渲染出 HTML → 用 archify 自带的 `check` 做 schema/布局校验（校验失败会打印具体错误路径并退出，此时修正 JSON 后重跑，不要跳过校验直接使用）→ 用无头 Chrome 截图导出高清 PNG → 自动尝试添加水印（同 render.sh 逻辑，从 `分析报告.md` 提取项目名称）。
+   - 可选第4个参数指定截图缩放倍数（默认 3）：`node scripts/render_archify.mjs architecture input.json output.png 4`
+3. **产物同步**：与步骤5相同，只是被删除的源代码块换成了 `.architecture.json` 对应的说明块（如果占位符后确实写了 JSON 代码块作为草稿，也要一并清理），最终替换为图片引用。
+
+### 4. 渲染为 PNG（Mermaid+mmdc 路径，非架构类图表）
 
 将 `.mmd` 文件渲染为 PNG：
 
@@ -230,6 +274,13 @@ graph TD
 2. 编写 gantt 类型 mermaid
 3. 渲染 PNG
 4. 插入到指定位置
+
+用户：把系统总体架构图画出来
+操作：
+1. 识别为架构类图表 → 走 archify 路径（步骤3.5）
+2. 编写 XX.architecture.json（components/connections，忠实于占位符前后已有的结构依据）
+3. node scripts/render_archify.mjs architecture XX.architecture.json diagram-系统总体架构图.png
+4. 替换占位符，删除源 JSON 说明块
 ```
 
 ## 渲染失败排查
@@ -238,6 +289,8 @@ graph TD
 2. **图表溢出**：减少节点数量或增加 width 参数
 3. **语法错误**：先用 `npx @mermaid-js/mermaid-cli -i file.mmd -o /dev/null` 验证语法
 4. **节点 ID 冲突**：不同 subgraph 中的节点 ID 不能重复
+5. **archify schema 校验失败**：`node scripts/render_archify.mjs` 会打印形如 `/components/2 (id/label: "db") must be equal to one of the allowed values` 的具体错误路径，按提示修正 JSON 字段（通常是 `type` 用了 schema 之外的值，或多写了 `additionalProperties`），修正后重跑，不要绕过校验强行截图
+6. **archify 找不到 puppeteer**：说明 `@mermaid-js/mermaid-cli` 未按预期安装在全局 npm 目录下，改用步骤3.5产出的临时 HTML（脚本报错信息中会给出路径）手动用系统内已装的 Chrome 截图，或退回该图表的 Mermaid+mmdc 路径
 
 ## 完成状态
 
@@ -249,6 +302,7 @@ graph TD
 生成图表数: {N}
   其中直接使用上游Mermaid代码: {N}
   其中由ASCII图转换: {N}
+  其中使用archify渲染（架构类）: {N}
 跳过占位符（非图表类）: {N}
 跳过占位符（缺少结构化依据，需补充正文）: {N}，清单：{占位符位置1, 占位符位置2, ...}
 图表清单: {diagram-XX.png, diagram-YY.png, ...}

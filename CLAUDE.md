@@ -232,7 +232,7 @@ The root README.md claims this skill has been "migrated to the material-hub repo
 
 **Python** (3.8+): `pdfplumber`, `PyMuPDF` (fitz), `python-docx`, `requests`/`httpx` (MaterialHub client), `openpyxl`/`pandas`-style Excel parsing.
 
-**Node.js**: `docx` npm package (bid-md2doc), Mermaid CLI (bid-mermaid-diagrams).
+**Node.js**: `docx` npm package (bid-md2doc), Mermaid CLI (bid-mermaid-diagrams). `bid-mermaid-diagrams` also vendors [archify](https://github.com/tt-a1i/archify) (MIT, zero runtime deps) at `skills/bid-mermaid-diagrams/scripts/archify/` as the default renderer for architecture-type diagrams (system/deployment/topology) — higher-quality output than Mermaid for that category, invoked via `scripts/render_archify.mjs` which shells out to a headless Chrome (reuses the Puppeteer bundled with `@mermaid-js/mermaid-cli`, no extra install). Flow/org-chart/gantt/ER diagrams still go through Mermaid+mmdc.
 
 **Optional external services** (all fail gracefully with a warning if unset/offline):
 - DocScan (`docscan/`, git submodule): `http://localhost:8800`, requires Docker for its ONLYOFFICE dependency.
