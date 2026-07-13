@@ -49,10 +49,29 @@ if (checkResult && checkResult.ok === false) {
 }
 
 function findPuppeteer() {
-  const globalRoot = spawnSync('npm', ['root', '-g'], { encoding: 'utf8' }).stdout.trim();
-  const candidates = [
-    path.join(globalRoot, '@mermaid-js', 'mermaid-cli', 'node_modules', 'puppeteer', 'lib', 'esm', 'puppeteer', 'puppeteer.js'),
-  ];
+  // Prefer the Puppeteer bundled inside @mermaid-js/mermaid-cli — no extra install needed.
+  // We resolve the mermaid-cli root by walking up from its own bin script, which avoids
+  // shelling out to `npm root -g` (that command can time out in constrained environments).
+  const mmdc = spawnSync('which', ['mmdc'], { encoding: 'utf8' }).stdout.trim()
+    || spawnSync('which', ['npx'], { encoding: 'utf8' }).stdout.trim();
+
+  const candidates = [];
+
+  // Try to find mermaid-cli via node_modules resolution from known NVM / global paths.
+  const nodeExecDir = path.dirname(process.execPath);          // e.g. ~/.nvm/.../bin
+  const nodeModulesGlobal = path.resolve(nodeExecDir, '..', 'lib', 'node_modules');
+  candidates.push(
+    path.join(nodeModulesGlobal, '@mermaid-js', 'mermaid-cli', 'node_modules', 'puppeteer', 'lib', 'esm', 'puppeteer', 'puppeteer.js'),
+  );
+
+  // Fallback: mmdc binary sits at <prefix>/bin/mmdc → <prefix>/lib/node_modules/...
+  if (mmdc) {
+    const prefix = path.resolve(path.dirname(mmdc), '..');
+    candidates.push(
+      path.join(prefix, 'lib', 'node_modules', '@mermaid-js', 'mermaid-cli', 'node_modules', 'puppeteer', 'lib', 'esm', 'puppeteer', 'puppeteer.js'),
+    );
+  }
+
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
   }
