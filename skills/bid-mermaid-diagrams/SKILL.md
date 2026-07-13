@@ -120,27 +120,52 @@ grep -rl "【此处插入.*图】" 响应文件/*.md 2>/dev/null
 
 **步骤（替代步骤3/4，仅用于架构类图表）：**
 
-1. **不编写 `.mmd` 文件**，改为编写 archify 的 JSON IR 文件 `{描述}.architecture.json`。字段结构（对照 `scripts/archify/schemas/architecture.schema.json` 和 `scripts/archify/examples/web-app.architecture.json`）：
+1. **不编写 `.mmd` 文件**，改为编写 archify 的 JSON IR 文件 `{描述}.architecture.json`。
+
+   **⚠️ 必须使用 grid 布局模式（不要手算 `pos`/`size` 坐标）**：手算像素坐标极易导致标签与组件重叠、组件超出画布，archify 校验器会直接拒绝渲染。使用 grid 模式时，只需给每个组件写 `row`/`col` 整数，渲染器自动计算位置：
+
    ```json
    {
      "schema_version": 1,
      "diagram_type": "architecture",
      "meta": { "title": "系统总体架构", "subtitle": "..." },
+     "layout": {
+       "mode": "grid",
+       "cols": 4,
+       "cellW": 160,
+       "cellH": 70,
+       "gapX": 40,
+       "gapY": 40,
+       "origin": [60, 60]
+     },
      "components": [
-       { "id": "web", "type": "frontend", "label": "Web前端", "pos": [60, 60], "size": [140, 60] },
-       { "id": "api", "type": "backend", "label": "业务服务", "pos": [280, 60], "size": [140, 60] }
+       { "id": "web",  "type": "frontend", "label": "Web前端",  "sublabel": "Vue3",       "row": 0, "col": 0 },
+       { "id": "gw",   "type": "backend",  "label": "API网关",  "sublabel": "鉴权/限流",   "row": 0, "col": 1 },
+       { "id": "svc",  "type": "backend",  "label": "业务服务", "sublabel": "SpringBoot", "row": 0, "col": 2 },
+       { "id": "db",   "type": "database", "label": "数据库",   "sublabel": "MySQL",      "row": 0, "col": 3 }
      ],
      "connections": [
-       { "from": "web", "to": "api", "label": "HTTP调用" }
+       { "from": "web", "to": "gw",  "label": "HTTPS" },
+       { "from": "gw",  "to": "svc" },
+       { "from": "svc", "to": "db",  "label": "SQL" }
      ],
      "boundaries": [],
      "cards": []
    }
    ```
-   - `type` 只能是 `frontend`/`backend`/`database`/`cloud`/`security`/`messagebus`/`external` 之一，按组件实际角色选取
-   - 节点文字（`label`/`title`）直接用中文，无需像 Mermaid 那样英文ID+中文标签分离——`id` 仍必须是英文（Schema 约束），但 `label` 用中文
-   - 与 3.节相同的**忠实原则**依然适用：结构、节点、层级来自占位符前后已有的 Mermaid 代码块/ASCII 图/文字描述，不得凭空编造
-   - 若占位符后已有旧格式的 Mermaid `graph`/ASCII 图，将其结构忠实转译为 archify 的 `components`/`connections`——转译时你需要重新判断节点的视觉布局（`pos`/`size`）和分组方式，但不得改变原图定义的节点集合、层级归属、连接关系
+
+   **grid 参数说明**：
+   - `cols`：总列数（决定画布宽度，按最大 col+1 取值，通常 3–6）
+   - `cellW` / `cellH`：每格宽高（px），中文标签建议 `cellW ≥ 150`
+   - `gapX` / `gapY`：格间距，建议 30–50
+   - `origin`：左上角起始坐标，默认 `[60, 60]` 留出边距即可
+   - 组件只写 `row`/`col`，**不写 `pos`/`size`**——两者并存时 `pos` 优先，混用会产生坐标冲突
+
+   **其他字段规则**：
+   - `type` 只能是 `frontend`/`backend`/`database`/`cloud`/`security`/`messagebus`/`external`
+   - `id` 必须英文（Schema 约束），`label`/`sublabel` 用中文
+   - **忠实原则**依然适用：节点集合、层级归属、连接关系来自原始 Mermaid/ASCII 图/文字描述，不得凭空编造；grid 的 `row`/`col` 是视觉排布，由你决定，但不能增删节点
+   - `connections` 中的 `label` 若文字较长容易与组件重叠，改成空（省略 `label` 字段）或用 `cards` 说明，比强行塞标签更稳
 2. **渲染**：
    ```bash
    node scripts/render_archify.mjs architecture input.architecture.json output.png
@@ -289,8 +314,13 @@ graph TD
 2. **图表溢出**：减少节点数量或增加 width 参数
 3. **语法错误**：先用 `npx @mermaid-js/mermaid-cli -i file.mmd -o /dev/null` 验证语法
 4. **节点 ID 冲突**：不同 subgraph 中的节点 ID 不能重复
-5. **archify schema 校验失败**：`node scripts/render_archify.mjs` 会打印形如 `/components/2 (id/label: "db") must be equal to one of the allowed values` 的具体错误路径，按提示修正 JSON 字段（通常是 `type` 用了 schema 之外的值，或多写了 `additionalProperties`），修正后重跑，不要绕过校验强行截图
-6. **archify 找不到 puppeteer**：说明 `@mermaid-js/mermaid-cli` 未按预期安装在全局 npm 目录下，改用步骤3.5产出的临时 HTML（脚本报错信息中会给出路径）手动用系统内已装的 Chrome 截图，或退回该图表的 Mermaid+mmdc 路径
+5. **archify 布局校验失败**（最常见）：报错形如 `Label "XX" overlaps component "YY"` 或 `Component "ZZ" falls outside the viewBox`。**不要切回 Mermaid 路径**——这是 JSON 写法问题，切 Mermaid 只是逃避。正确做法：
+   - 若使用了手算 `pos`/`size`：改用 grid 模式（`layout.mode: "grid"` + 每个组件写 `row`/`col`），彻底消灭坐标类错误
+   - 若 grid 模式下 boundary 超出画布：增大 `cols` 或 `cellW`/`cellH`，或把 boundary 成员改到更靠中间的 `row`/`col`
+   - 若 connection label 压节点：删掉该 label（省略 `label` 字段），或把说明移到 `cards`
+   - 修正后重跑 `node scripts/render_archify.mjs`，直到命令输出 `OK: ...` 为止
+6. **archify schema 校验失败**：报错形如 `/components/2 must NOT have additional properties`。按提示修正 JSON 字段（通常是 `type` 用了 schema 之外的值，或混写了 `pos` 和 `row`/`col`），修正后重跑
+7. **archify 找不到 puppeteer**：说明 `@mermaid-js/mermaid-cli` 未按预期安装，脚本会打印临时 HTML 路径，用系统内已装的 Chrome 手动截图即可
 
 ## 完成状态
 
