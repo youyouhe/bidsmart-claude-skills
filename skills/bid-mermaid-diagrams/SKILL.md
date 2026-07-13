@@ -20,14 +20,32 @@ description: >
 - Node.js（已预装）
 - @mermaid-js/mermaid-cli（已预装，禁止自行安装）
 - mermaid_render 工具（系统内置扩展，优先使用）
-- archify（`scripts/archify/`，已随本 skill 内置，无需安装，架构类图表的可选渲染后端）
+- archify（`scripts/archify/`，已随本 skill 内置，无需安装，架构类图表的渲染引擎）
+- archify render server（`scripts/archify-server.mjs`，需在沙盒外预先启动，端口 18800）
 
 ## 核心工具
 
 - **mermaid_render**：系统内置工具，直接传入 Mermaid 代码和输出路径即可渲染，优先使用（流程图/组织架构图/甘特图/ER图走这条路径）
 - 渲染脚本：`scripts/render.sh`（备用方案，Mermaid+mmdc 路径）
 - 主题配置：`scripts/mermaid.json`（蓝色专业主题，支持中文）
-- **archify 渲染脚本**：`scripts/render_archify.mjs`（架构类图表默认走这条路径，见步骤 3.5）
+- **archify 渲染脚本**：`scripts/render_archify.mjs`（架构类图表走这条路径，优先通过 HTTP 调用沙盒外的 archify-server，服务不在线才尝试本地 Puppeteer）
+
+## Archify Server 启动方式
+
+archify render server 需在**沙盒外**单独启动（Chrome/Puppeteer 需要完整系统权限），类似 DocScan（8800）和 MaterialHub（8201）的模式：
+
+```bash
+# 启动（默认端口 18800，后台运行，日志写到 /tmp/archify-server-18800.log）
+bash skills/bid-mermaid-diagrams/scripts/start-archify-server.sh
+
+# 停止
+bash skills/bid-mermaid-diagrams/scripts/stop-archify-server.sh
+
+# 健康检查
+curl http://127.0.0.1:18800/health
+```
+
+服务在线时，`render_archify.mjs` 内部会自动通过 HTTP POST 发给服务端渲染，Chrome/Puppeteer 完全跑在沙盒外；服务不在线时退为本地 Puppeteer（仅在沙盒外环境有效）。
 
 ## 工作流程
 
@@ -320,7 +338,7 @@ graph TD
    - 若 connection label 压节点：删掉该 label（省略 `label` 字段），或把说明移到 `cards`
    - 修正后重跑 `node scripts/render_archify.mjs`，直到命令输出 `OK: ...` 为止
 6. **archify schema 校验失败**：报错形如 `/components/2 must NOT have additional properties`。按提示修正 JSON 字段（通常是 `type` 用了 schema 之外的值，或混写了 `pos` 和 `row`/`col`），修正后重跑
-7. **archify 找不到 puppeteer**：说明 `@mermaid-js/mermaid-cli` 未按预期安装，脚本会打印临时 HTML 路径，用系统内已装的 Chrome 手动截图即可
+7. **archify-server 未启动**：`render_archify.mjs` 会打印 `archify-server not running, using local Puppeteer`，退为本地模式。在沙盒内运行时本地 Puppeteer 同样不可用，此时应先在沙盒外执行 `bash scripts/start-archify-server.sh` 再重试
 
 ## 完成状态
 
