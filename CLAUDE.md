@@ -4,60 +4,52 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Overview
 
-BidSmart Claude Skills is a comprehensive Claude Code skills plugin for Chinese government procurement bid management. It provides 11 specialized skills that automate the end-to-end workflow from analyzing tender documents to generating final Word proposal documents.
+BidSmart Claude Skills is a Claude Code skills plugin. Its core purpose is Chinese government procurement bid management, plus a secondary, unrelated set of web-site-building skills bundled in the same plugin. There are 24 skill directories under `skills/` (not all of them are part of the orchestrated bid pipeline — see below).
 
 ## Architecture
 
 ### Skills Plugin Structure
 
-All skills are located in `skills/` directory. Each skill directory contains:
-- `SKILL.md` - Skill definition with YAML frontmatter (name, description, trigger conditions) followed by detailed workflow documentation
-- `scripts/` (optional) - Helper Python/JavaScript scripts for that skill
+Each directory under `skills/` contains:
+- `SKILL.md` — required. YAML frontmatter (`name`, `description` with trigger conditions) followed by the workflow documentation Claude follows when the skill is invoked.
+- `scripts/` (optional) — helper Python/Node scripts.
 
-The plugin is registered via `.claude-plugin/marketplace.json` which defines the plugin metadata for Claude Code's marketplace system.
+The plugin is registered via `.claude-plugin/marketplace.json`.
 
-### Workflow Pipeline
+### The orchestrated 10-stage bid pipeline (bid-manager)
 
-The 11 skills form a 10-stage bidding pipeline orchestrated by `bid-manager`:
+`bid-manager` orchestrates exactly these 10 stages, tracked in `pipeline_progress.json`:
 
 ```
-S1: Analysis → S2: Verification → S3: Info Collection → S4: Commercial → S5: Technical
-→ S6: Diagrams → S7: Material → S8: Quality Check → S9: Auto-fix → S10: Generate Word
+S1:分析(bid-analysis) → S2:核实(bid-verification) → S3:信息收集(人工交互，无 skill)
+→ S4:商务标(bid-commercial-proposal) → S5:技术标(bid-tech-proposal) → S6:图表(bid-mermaid-diagrams)
+→ S7:扫描件(bid-material-search) → S8:质检(bid-assembly) → S9:自动修复(bid-tech/commercial-proposal 修复模式)
+→ S10:生成Word(bid-md2doc)
 ```
 
-**Key Skills:**
-- **bid-manager** - Orchestrates complete workflow, tracks progress in `pipeline_progress.json`
-- **bid-analysis** - Parses tender documents (PDF/Word/Excel), extracts scoring criteria and requirements, supports multi-file input
-- **bid-verification** - Validates analysis report against source documents
-- **bid-tech-proposal** - Writes technical proposal markdown files
-- **bid-commercial-proposal** - Writes commercial proposal markdown files
-- **bid-mermaid-diagrams** - Generates Mermaid diagrams and renders to PNG
-- **bid-material-search** - FastAPI service for searching and inserting company materials
-- **bid-assembly** - Quality checks all outputs, generates verification report
-- **bid-md2doc** - Converts markdown to formatted Word documents
+Only S3 requires user interaction (collecting company info / pricing decisions); everything else runs with `AUTO_MODE=true`, skipping prompts and reading pre-collected data from `pipeline_progress.json`.
 
-### Data Flow
+**Skills NOT in this pipeline** — standalone, invoked independently, never called by bid-manager:
+- `bid-evaluation` — feasibility/go-no-go assessment before committing to bid, writes `投标评估报告.md`
+- `bid-eval-to-json` — converts `投标评估报告.md` → `投标评估报告.json`; depends on bid-evaluation's output
+- `bid-requirements` → `bid-software-design` — a separate, deeper "systems engineering" sub-pipeline (two-phase requirements spec feeding a three-phase DB/API/module design doc) used for large software-heavy bids
+- `bid-learner` — extracts lessons from the conversation and injects them into other bid-* skills' `gotchas.md` files, strictly scoped to bidding-domain issues
+- `bid-ppt` — presentation generation; *can* be invoked by bid-manager in AUTO_MODE as an optional add-on, but is not a numbered S1–S10 stage
+- `bid-material-extraction` — builds the reusable materials library that `bid-material-search` later searches; a one-off ingestion tool, not a pipeline stage
+- `bigmodel-ocr`, `generate-placeholder-toolkit` — utility skills used ad hoc
 
-1. **Input**: Tender/procurement documents (supports multiple files)
-   - **Word (.docx)** - Preferred format (accurate text and table extraction)
-   - **PDF** - Supported with TOC extraction and OCR
-   - **Excel (.xlsx, .xls)** - NEW: Technical specifications, quotation lists, parameter tables
-   - Multiple files supported: tender documents + technical specs + contract templates
-2. **Analysis**: Outputs `分析报告.md` (fixed filename, required by downstream skills)
-3. **Proposals**: Markdown files in `响应文件/` directory, numbered sequentially (e.g., `01-报价函.md`)
-4. **Final Output**: Word document in `响应文件/` directory
+**Web-building skills** (unrelated to the bid pipeline): `web-builder-initial`, `web-builder-update`, `web-markers-parser` (utility, called by the two builder skills), `design-system-applier`, `project-namer`, `web-prompt-categories`, `image-placeholder-guide` (reference doc injected into builder prompts, not user-invoked directly).
 
-### AUTO_MODE
+### Data Flow (bid pipeline)
 
-Skills can run in two modes:
-- **Interactive**: Prompts user for information and confirmations
-- **AUTO_MODE**: Used by bid-manager, skips prompts, uses pre-collected data from `pipeline_progress.json`
-
-Skills check for AUTO_MODE in context and adjust behavior accordingly.
+1. **Input**: Tender/procurement documents, multi-file supported (Word preferred, PDF with OCR fallback, Excel for spec/quotation tables, contract templates).
+2. **Analysis**: `分析报告.md` (fixed filename — hardcoded dependency for every downstream skill).
+3. **Proposals**: Markdown files in `响应文件/`, numbered sequentially (`01-报价函.md`, etc.).
+4. **Final Output**: Word document(s) in `响应文件/`, generated by bid-md2doc.
 
 ### Status Summaries
 
-Skills output structured status blocks at completion for parsing by orchestrators:
+Skills output structured status blocks at completion for orchestrators to parse:
 
 ```
 --- SKILL-NAME COMPLETE ---
@@ -69,31 +61,27 @@ Key: Value
 
 ## Development Commands
 
+There is no build, lint, or automated test suite in this repository (no root `package.json`, no CI config, no test runner). The only ways to exercise this code:
+
 ### Testing Skills Locally
 
 ```bash
-# Clone repository
 git clone https://github.com/youyouhe/bidsmart-claude-skills.git
 cd bidsmart-claude-skills
+```
 
-# Configure Claude Code to use local skills
-# Edit .claude/settings.local.json in your test project:
+Edit `.claude/settings.local.json` in your test project:
+```json
 {
   "extraKnownMarketplaces": {
     "bidsmart-local": {
-      "source": {
-        "source": "directory",
-        "path": "/absolute/path/to/bidsmart-claude-skills"
-      }
+      "source": { "source": "directory", "path": "/absolute/path/to/bidsmart-claude-skills" }
     }
   },
-  "enabledPlugins": {
-    "bidsmart-skills@bidsmart-local": true
-  }
+  "enabledPlugins": { "bidsmart-skills@bidsmart-local": true }
 }
-
-# Restart Claude Code to load skills
 ```
+Restart Claude Code to load skills, then run `/skills` to confirm they loaded.
 
 ### Testing Individual Scripts
 
@@ -107,122 +95,107 @@ python skills/bid-analysis/scripts/extract_pdf_toc.py <pdf_path> --pages-json pa
 # OCR (requires OCR_SERVICE_URL environment variable)
 python skills/bid-analysis/scripts/ocr_pages.py <pdf_path> --pages 1-10 --output ocr.json
 
-# Material search service
-cd skills/bid-material-search/scripts
-python app.py  # Starts FastAPI service on port 8000
+# Excel parsing
+python skills/bid-analysis/scripts/parse_excel.py 技术规范.xlsx --format both
+
+# bid-material-search connectivity check (requires MaterialHub API running)
+cd skills/bid-material-search
+python test_skill.py
 ```
+
+`bid-material-search` has **no standalone server to start** — see below.
 
 ### Version Control
 
 ```bash
-# Tag releases
 git tag -a v1.0.0 -m "Release message"
 git push origin v1.0.0
-
-# Follow conventional commits for CHANGELOG
-# feat: New feature
-# fix: Bug fix
-# docs: Documentation
-# refactor: Code refactoring
-# chore: Maintenance
 ```
+Follows conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`) for CHANGELOG entries. Note CHANGELOG.md itself has an inconsistency (two different `[1.1.0]` entries at different dates) — don't take its version numbers as authoritative for what's actually shipped; check git log instead.
 
 ## Key Implementation Details
 
 ### File Naming Conventions
 
-- **Analysis report**: MUST be named `分析报告.md` (hardcoded dependency)
-- **Response files**: Numbered like `01-报价函.md`, `02-授权书.md` in `响应文件/` directory
-- **Progress tracking**: `pipeline_progress.json` tracks pipeline state
-- **Quality report**: `核对报告.md` in `响应文件/`, excluded from final Word output
-- **Diagrams**: Named `diagram-N.png` where N is sequential
+- **Analysis report**: MUST be named `分析报告.md` (hardcoded dependency).
+- **Response files**: Numbered like `01-报价函.md`, `02-授权书.md` in `响应文件/`.
+- **Progress tracking**: `pipeline_progress.json`.
+- **Quality report**: `核对报告.md` in `响应文件/`, excluded from final Word output.
+- **Diagrams**: `diagram-N.png`, sequential.
 
 ### Word Processing Strategy
 
-**Priority**: Always prefer Word (.docx) over PDF when both available. Word provides exact text extraction, structured table data, and no OCR errors.
+**Priority**: Always prefer Word (.docx) over PDF when both are available — exact text extraction, structured tables, no OCR errors.
 
-**DocScan Service (Primary)**: `http://localhost:8800` — converts `.docx` to per-page Markdown server-side.
+**DocScan service (primary)** — a **git submodule** at `docscan/` (`.gitmodules`: `git@github.com:youyouhe/docscan.git`), converts `.docx` to per-page Markdown server-side. Two-stage startup, not a single process:
+1. `docscan/./start.sh [port]` first ensures an **ONLYOFFICE Docker container** is running (port 8079, JWT disabled, mounts `docscan/fonts/` for CJK font support) via `docker compose up -d` in `docscan/`, then
+2. starts the DocScan FastAPI service itself on port **8800** (default; overridable via `start.sh <port>`).
+3. `stop.sh` / `restart.sh` also provided.
 
-**Workflow**:
+Workflow once running:
 1. `GET /api/health` — check if service is online
-2. `POST /api/convert` (multipart `file=@path.docx`) → returns `fid` string
-3. `GET /api/md/{fid}` → full-document Markdown with tables, saved to `docscan_output.md` for verification
-4. Fallback if offline: use `python-docx` to extract paragraphs and tables directly
+2. `POST /api/convert` (multipart `file=@path.docx`) → returns an `id`/`fid`
+3. `GET /api/md/{fid}` → full-document per-page Markdown (tables included)
+4. `GET /api/md/{fid}/{page}` → single page
+5. Fallback if offline: use `python-docx` to extract paragraphs and tables directly
+
+There is no environment variable for the DocScan URL — `http://localhost:8800` is assumed by callers.
 
 ### PDF Processing Strategy
 
-**Priority**: Always prefer Word (.docx) over PDF when both available. Word provides:
-- Exact text extraction
-- Structured table data
-- No OCR errors
+1. `parse_pdf.py` extracts pages, detects if scanned
+2. `extract_pdf_toc.py` gets table-of-contents structure
+3. If scanned and `OCR_SERVICE_URL` is set, `ocr_pages.py` runs OCR
+4. Skills read the generated JSON files for structured access
+5. Fallback: Read tool directly, in 15-20 page chunks
 
-**PDF Workflow**:
-1. Run `parse_pdf.py` to extract pages and detect if scanned
-2. Run `extract_pdf_toc.py` to get table of contents structure
-3. If scanned and OCR_SERVICE_URL configured, run `ocr_pages.py`
-4. Skills read from generated JSON files for structured access
-5. Fallback: Use Read tool to read PDF directly in 15-20 page chunks
+**Critical**: scoring criteria and payment terms are often in tables — extract fully, never summarize.
 
-**Critical**: Chinese government tender documents often have critical data (scoring criteria, payment terms) in tables. Tables must be fully extracted, not summarized.
+### Excel Processing Strategy
 
-### Excel Processing Strategy (NEW in v2.4.0)
+Excel files (functional-parameter tables, quotation/budget lists, scoring-detail tables) complement the main tender document:
 
-**Priority**: Excel files contain detailed technical specifications, quotation lists, and parameter tables that complement main tender documents.
-
-**Typical Excel Files**:
-- Technical specification tables (功能参数表)
-- Quotation/budget lists (报价清单)
-- Feature comparison tables (功能对比表)
-- Scoring criteria details (评分细则表)
-
-**Excel Workflow**:
-1. Run `parse_excel.py` to extract all worksheets and data
-2. Generates both JSON (structured) and Markdown (human-readable) outputs
-3. Skills read Markdown format for easy table comprehension
-4. Supports multi-file processing (batch mode)
-5. Fallback: Claude can directly read Excel files
-
-**Usage**:
 ```bash
-# Single file
 python skills/bid-analysis/scripts/parse_excel.py 技术规范.xlsx --format both
-
-# Output:
-# - 技术规范_data.json (complete data)
-# - 技术规范_data.md (formatted tables)
+# → 技术规范_data.json (structured) + 技术规范_data.md (readable tables)
 ```
 
-**Multi-File Integration**:
-- Main file (磋商文件.docx): Scoring criteria, process requirements
-- Excel files: Detailed parameters, pricing breakdown
-- Contract templates: Payment terms, warranty periods
-- All information merged into unified analysis report with source attribution
+Multi-file integration merges main tender doc + Excel specs + contract templates into one analysis report with source attribution per fact. See `skills/bid-analysis/MULTI_FILE_EXAMPLE.md`.
 
-**See**: `skills/bid-analysis/MULTI_FILE_EXAMPLE.md` for complete workflow examples.
+### Word Document Generation (bid-md2doc)
 
-### Word Document Generation
+`bid-md2doc` reads project/company names from `分析报告.md` and the commercial-proposal files, then invokes `generate_docx.js` by passing a **JSON string as a CLI argument** — it never edits a CONFIG block in the script:
 
-The `bid-md2doc` skill:
-1. Reads project name from `分析报告.md`
-2. Reads company name from commercial proposal files
-3. Edits CONFIG section of `/home/tiger/bid/generate_docx.js`
-4. Runs Node.js script to convert all markdown files in `响应文件/` to single Word document
-5. Excludes `核对报告.md` and `装订指南.md` from output
+```bash
+node <path-to>/generate_docx.js '{"inputDir":"{workDir}/响应文件","outputFile":"响应文件-{公司简称}-{项目简称}.docx","headerText":"{项目全称} 响应文件","footerCompany":"{公司全称}"}'
+```
+Key CONFIG fields (all passed via that JSON blob, parsed with `process.argv[2]`): `inputDir`, `outputFile`, `headerText`, `footerCompany`, `excludeFiles` (default excludes `核对报告.md`, `装订指南.md`), `includeFiles` (overrides excludeFiles), `fileOrder`. Multi-book output = multiple invocations with different `includeFiles`/`excludeFiles`.
 
-### Material Search Service
+**⚠️ Portability caveat**: `bid-md2doc`'s SKILL.md (and `bid-assembly`'s and `bid-learner`'s) hardcode an absolute script path pointing into a *different, sibling checkout* of this skills repo vendored inside a larger platform monorepo (`/mnt/oldroot/home/bird/xyy/smartbid-platform/packages/bidsmart-skills/skills/<skill>/scripts/...`), not this repo's own `skills/bid-md2doc/scripts/generate_docx.js`. These paths only resolve on that specific host/checkout — if you're running from a plugin install or a different clone, use this repo's own `skills/bid-md2doc/scripts/generate_docx.js` instead and update the SKILL.md path accordingly. Do not confuse the `smartbid-platform/` directory *inside this repo* (a near-empty placeholder — just one `README.txt` saying "受保护的SKILL内容目录") with that external platform repo.
 
-`bid-material-search` provides FastAPI REST service:
-- Serves extracted materials (images of certificates, contracts, etc.)
-- Provides keyword search via `/search` endpoint
-- Supports batch placeholder replacement in markdown files
-- Uses `index.json` for metadata and full-text search
+### Material Search (bid-material-search) — v3.0, direct API calls, NOT a FastAPI server
+
+As of v3.0.0 there is **no standalone server to start** for this skill. It removed the old FastAPI middleware (and the port-9000 "旧架构" it used to run on) — `scripts/app.py` no longer exists (only stale compiled `.pyc` remnants remain in `scripts/__pycache__/`). Current architecture: plain Python functions in `skills/bid-material-search/scripts/` (`search.py`, `extract.py`, `replace.py`, `watermark.py`, `config.py`) call the MaterialHub REST API directly:
+
+```
+用户 → Skill (Python函数) → MaterialHub API (localhost:8201)
+```
+
+Requires the MaterialHub API server itself running (separate project — `git clone https://github.com/youyouhe/material-hub.git`) on port 8201. Configure via `.env`:
+```bash
+MATERIALHUB_API_URL=http://localhost:8201
+MATERIALHUB_API_KEY=mh-mcp-xxx...   # copy from material-hub/.env
+```
+`config.py` looks for `.env` in cwd → repo root → material-hub root, in that order — there's no root-level `.env.example` in *this* repo, only `skills/bid-material-search/.env.example`.
+
+The root README.md claims this skill has been "migrated to the material-hub repository" — treat that as aspirational/in-progress, not current fact: the full skill (SKILL.md, scripts, docs) still lives in and is actively used from `skills/bid-material-search/` in this repo.
 
 ## Skill Development Guidelines
 
 ### Creating New Skills
 
-1. Create directory in `skills/new-skill-name/`
-2. Write `SKILL.md` with YAML frontmatter:
+1. Create `skills/new-skill-name/`.
+2. `SKILL.md` frontmatter:
    ```yaml
    ---
    name: skill-name
@@ -231,84 +204,55 @@ The `bid-md2doc` skill:
      Include trigger keywords and preconditions.
    ---
    ```
-3. Document workflow as numbered steps
-4. Include status summary format if skill will be orchestrated
-5. Add scripts to `scripts/` subdirectory if needed
-6. Update `README.md` to list new skill
+3. Document workflow as numbered steps.
+4. Include the status-summary format if the skill will be orchestrated by bid-manager.
+5. Add scripts to `scripts/` if needed — keep them self-contained within the skill directory (avoid the hardcoded external-path pattern described above).
 
 ### Skill Communication Protocol
 
-Skills in the pipeline communicate via:
-1. **Files**: Analysis outputs go to fixed filenames (e.g., `分析报告.md`)
-2. **Progress JSON**: `pipeline_progress.json` stores cross-skill state
-3. **Status summaries**: Structured text blocks for orchestrators to parse
-4. **Context flags**: AUTO_MODE and other flags passed in conversation context
+1. **Files**: fixed filenames like `分析报告.md` for cross-skill handoff.
+2. **`pipeline_progress.json`**: cross-skill/cross-session state.
+3. **Status summaries**: structured text blocks for bid-manager to parse.
+4. **Context flags**: `AUTO_MODE` and similar flags passed in conversation context.
 
 ### Error Handling Patterns
 
-- **Missing prerequisites**: Check for required files, return clear error message
-- **Data validation**: Verify extracted data (e.g., scoring totals match)
-- **Graceful degradation**: If optional services (OCR, material library) unavailable, skip with warning
-- **Fix loops**: `bid-assembly` + `bid-manager` implement auto-fix with 2-round limit
-
-## Testing Skills
-
-### Manual Testing Workflow
-
-1. Place sample tender document in test directory
-2. Run `/bid-analysis <path>` and verify `分析报告.md` accuracy
-3. Run `/bid-tech-proposal` and check markdown quality
-4. Run `/bid-mermaid-diagrams` and verify PNG generation
-5. Run `/bid-md2doc` and check Word formatting
-
-### Validation Checklist
-
-- [ ] Scoring criteria totals match (sub-items sum to category total)
-- [ ] All tables from tender fully extracted
-- [ ] Qualification requirements match source exactly (no hallucination)
-- [ ] Diagrams render correctly as PNG
-- [ ] Word document includes all markdown files except excluded ones
-- [ ] Images embedded in Word correctly
-- [ ] No placeholder text like 【此处插入XX】 remains in final output
+- **Missing prerequisites**: check for required files, return a clear error.
+- **Data validation**: verify extracted data (e.g. scoring sub-items sum to the stated category total).
+- **Graceful degradation**: skip optional services (OCR, MaterialHub) with a warning if unavailable.
+- **Fix loops**: `bid-assembly` + `bid-manager` implement auto-fix with a 2-round limit (S9).
 
 ## Chinese Language Considerations
 
-- All prompts, outputs, and file contents use Simplified Chinese
-- Tender documents follow Chinese government procurement format
-- Compliance requirements reference Chinese regulations
-- File and directory names use Chinese characters
-- Ensure terminal/editor supports UTF-8
+- All prompts, outputs, and file contents use Simplified Chinese.
+- Tender documents follow Chinese government procurement format; compliance references Chinese regulations.
+- File and directory names use Chinese characters — ensure UTF-8 throughout.
 
 ## Dependencies
 
-**Python** (3.8+):
-- `pdfplumber` - PDF table extraction
-- `PyMuPDF` (fitz) - PDF parsing
-- `python-docx` - Word document reading
-- `fastapi`, `uvicorn` - Material search service
-- `requests` - OCR client (optional)
+**Python** (3.8+): `pdfplumber`, `PyMuPDF` (fitz), `python-docx`, `requests`/`httpx` (MaterialHub client), `openpyxl`/`pandas`-style Excel parsing.
 
-**Node.js**:
-- `docx` package - Word document generation
-- Mermaid CLI - Diagram rendering
+**Node.js**: `docx` npm package (bid-md2doc), Mermaid CLI (bid-mermaid-diagrams).
 
-**Optional Services**:
-- DocScan Word conversion service: `http://localhost:8800` (preferred for `.docx` reading; falls back to `python-docx` if offline)
-- OCR service endpoint (configure via `OCR_SERVICE_URL`)
+**Optional external services** (all fail gracefully with a warning if unset/offline):
+- DocScan (`docscan/`, git submodule): `http://localhost:8800`, requires Docker for its ONLYOFFICE dependency.
+- MaterialHub API (separate repo): `http://localhost:8201`, requires `MATERIALHUB_API_URL`/`MATERIALHUB_API_KEY`.
+- OCR service: configure via `OCR_SERVICE_URL` (used by `bid-analysis/scripts/ocr_pages.py`).
 
 ## Common Issues
 
 ### Skills Not Loading
-- Check `.claude/settings.local.json` syntax is valid JSON
-- Verify marketplace path is absolute and correct
-- Restart Claude Code completely
+- Check `.claude/settings.local.json` is valid JSON.
+- Verify the marketplace path is absolute and correct.
+- Restart Claude Code completely.
 
 ### PDF Parsing Errors
-- Word format strongly preferred over PDF
-- Check if PDF is password-protected
-- For scanned PDFs, configure OCR service
+- Word format strongly preferred over PDF.
+- Check if the PDF is password-protected.
+- For scanned PDFs, configure `OCR_SERVICE_URL`.
 
 ### Word Generation Fails
-- Verify `docx` npm package installed in `/home/tiger/bid/`
-- Check image paths in markdown are correct
-- Verify no special characters breaking table parsing
+- Verify the `docx` npm package is installed alongside `generate_docx.js` (run `npm install` in its directory — see `scripts/package.json`).
+- Check image paths in markdown are correct.
+- Verify no special characters are breaking table parsing.
+- If invoking via a hardcoded absolute path (see portability caveat above), confirm that path actually exists on the current host.
