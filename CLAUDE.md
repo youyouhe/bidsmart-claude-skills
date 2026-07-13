@@ -217,7 +217,7 @@ The root README.md claims this skill has been "migrated to the material-hub repo
 
 ### Error Handling Patterns
 
-- **Missing prerequisites**: check for required files, return a clear error.
+- **Missing prerequisites**: every skill with an upstream dependency (`分析报告.md`, `响应文件/*.md`, `_metadata.md`, `投标评估报告.json`, etc.) has a standardized **"Step 0: 前置检查"** at the top of its workflow (see `bid-verification`, `bid-commercial-proposal`, `bid-tech-proposal`, `bid-mermaid-diagrams`, `bid-material-search`, `bid-assembly`, `bid-md2doc`, `bid-evaluation`, `bid-eval-html`, `bid-software-design`, `generate-placeholder-toolkit`). The check has three outcomes: (1) prerequisite present → proceed; (2) missing, interactive session → stop and ask the user whether to run the missing upstream skill now — proceed only if they agree, otherwise pause; (3) missing, `AUTO_MODE=true` → cannot block on user input, so mark the stage `FAILED` (not `SUCCESS`) in the completion status block with the specific missing artifact named, letting `bid-manager` halt the pipeline at that stage rather than silently continuing into a stage whose input doesn't exist.
 - **Data validation**: verify extracted data (e.g. scoring sub-items sum to the stated category total).
 - **Graceful degradation**: skip optional services (OCR, MaterialHub) with a warning if unavailable.
 - **Fix loops**: `bid-assembly` + `bid-manager` implement auto-fix with a 2-round limit (S9).

@@ -20,6 +20,20 @@ description: >
 
 ## 工作流程
 
+### 0. 前置检查（必须先执行）
+
+检查 `响应文件/` 目录下是否存在编写完成的 `.md` 文件：
+
+```bash
+ls 响应文件/*.md 2>/dev/null
+```
+
+- **存在** → 继续第 1 步
+- **不存在或目录为空** → 停止，告知用户："`响应文件/` 目录下未找到 `.md` 文件，生成 Word 文档需要先完成 `bid-tech-proposal`/`bid-commercial-proposal` 的编写（如需图表和扫描件，还需先跑 `bid-mermaid-diagrams`/`bid-material-search`）。是否现在运行？"
+  - 用户同意 → 调用对应 skill 后继续
+  - 用户不同意 → 暂停本次任务
+- **AUTO_MODE=true** 时：不可交互等待，直接在完成状态摘要中标注 `FAILED`，说明"响应文件/ 为空，无法生成 Word"，交由 bid-manager 处理
+
 ### 1. 读取项目信息（仅读取文本文件，不要读取图片）
 
 **⚠️ 重要：只读取 .md 文本文件，不要使用 Read 工具读取 .png 或 .jpg 图片文件**

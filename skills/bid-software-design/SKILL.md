@@ -102,6 +102,14 @@ EOF
 
 ### 0.1 定位数据源
 
+**前置检查（必须先执行）**：确认 `_metadata.md`（由 `bid-requirements` Phase 0 生成）及至少一个 `S0N-*.md` 需求规格文件存在：
+
+- **都存在** → 继续扫描
+- **缺失** → 停止，告知用户："未找到 `_metadata.md` 或需求规格文件（`S0N-*.md`），软件设计需要以 `bid-requirements` 的产出为基础。是否现在运行 bid-requirements？"
+  - 用户同意 → 调用 `bid-requirements` 后继续
+  - 用户不同意 → 暂停本次设计任务
+- **AUTO_MODE=true** 时：不可交互等待，直接在完成状态摘要中标注 `FAILED`，说明"缺少 bid-requirements 产出"，交由调用方处理
+
 扫描需求分析输出目录：
 
 | 文件 | 读取方式 | 提取内容 |

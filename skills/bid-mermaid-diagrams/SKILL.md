@@ -27,6 +27,20 @@ description: >
 
 ## 工作流程
 
+### 0. 前置检查（必须先执行）
+
+检查 `响应文件/` 目录下是否存在包含图表占位符的 `.md` 文件（由 `bid-tech-proposal`/`bid-commercial-proposal` 生成）：
+
+```bash
+grep -rl "【此处插入.*图】" 响应文件/*.md 2>/dev/null
+```
+
+- **有匹配文件** → 继续第 1 步
+- **无匹配文件或 `响应文件/` 不存在** → 停止，告知用户："未在 `响应文件/` 下找到图表占位符，图表渲染需要先由 `bid-tech-proposal`/`bid-commercial-proposal` 写好占位符及 Mermaid 代码块。是否现在运行对应 skill？"
+  - 用户同意 → 调用相应 skill 后继续
+  - 用户不同意 → 暂停本次任务
+- **AUTO_MODE=true** 时：不可交互等待，直接在完成状态摘要中标注 `FAILED`，说明"未找到图表占位符"，交由 bid-manager 处理
+
 ### 1. 扫描占位符
 
 在目标 markdown 文件中查找 `【此处插入XX图】` 格式的占位符。
