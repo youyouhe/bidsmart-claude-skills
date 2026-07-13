@@ -234,6 +234,7 @@ async def replace_placeholder(
     query: str,
     project_name: str = "",
     output_dir: str = "响应文件",
+    auto_mode: bool = False,
 ) -> dict:
     """替换单个占位符
 
@@ -243,12 +244,18 @@ async def replace_placeholder(
         query: 搜索关键词（如"营业执照"）
         project_name: 项目名称（用于水印）
         output_dir: 图片输出目录
+        auto_mode: 是否为自动模式（bid-manager 调度时为 True，此时不能等待用户交互，
+            多个匹配结果时按相关度取第一个但在返回结果中明确标注 ambiguous=True，
+            供上游质检环节（bid-assembly）复核；非自动模式下应返回候选列表交由
+            调用方（Claude）向用户提问后再次调用并指定 doc_id）
 
     Returns:
         {
             "success": bool,
             "message": str,
             "image_path": str,  # 如果成功
+            "ambiguous": bool,  # 如果搜索命中多个结果
+            "candidates": [...],  # ambiguous=True 时的候选列表
         }
     """
     # 1. 智能搜索文档（使用多级回退策略）
@@ -256,15 +263,101 @@ async def replace_placeholder(
     if not results:
         return {"success": False, "message": f"未找到匹配 '{query}' 的材料"}
 
-    # 使用第一个结果
-    doc = results[0]
+    # 多个结果时的歧义处理：不静默取第一个
+    if len(results) > 1:
+        candidates = [
+            {
+                "id": r["id"],
+                "title": r["title"],
+                "folder": r.get("folder", {}).get("path", ""),
+                "entity_names": r.get("entity_names", []),
+                "expiry_date": r.get("expiry_date", ""),
+            }
+            for r in results
+        ]
+        if not auto_mode:
+            # 交互模式：不猜测，返回候选列表，调用方应向用户展示后
+            # 用 doc_id 参数重新调用 replace_placeholder_by_id 完成替换
+            return {
+                "success": False,
+                "ambiguous": True,
+                "message": f"'{query}' 匹配到 {len(results)} 个材料，需人工确认使用哪一个",
+                "candidates": candidates,
+            }
+        # AUTO_MODE：不能阻塞等待用户输入，取第一个但显式标注存疑，
+        # 供 bid-assembly 质检阶段复核，不当作确定无误的结果静默处理
+        doc = results[0]
+        ambiguous_flag = True
+        ambiguous_note = f"AUTO_MODE 下从 {len(results)} 个匹配中自动选取第一个，未经人工确认，需质检复核"
+    else:
+        doc = results[0]
+        ambiguous_flag = False
+        ambiguous_note = None
+
     doc_id = doc["id"]
     doc_title = doc["title"]
 
-    # 2. 获取文档详情
+    return await _replace_with_document(
+        target_file, placeholder, doc_id, doc_title, project_name, output_dir,
+        ambiguous=ambiguous_flag, ambiguous_note=ambiguous_note,
+    )
+
+
+async def replace_placeholder_by_id(
+    target_file: str,
+    placeholder: str,
+    doc_id: int,
+    project_name: str = "",
+    output_dir: str = "响应文件",
+) -> dict:
+    """使用用户已确认的 doc_id 完成占位符替换（消歧后的第二次调用）
+
+    当 replace_placeholder 返回 ambiguous=True 后，应将 candidates 展示给用户，
+    用户选定具体材料后，用其 id 调用本函数完成实际替换。
+    """
     detail = await search.get_document_detail(doc_id)
     if not detail:
         return {"success": False, "message": f"获取文档详情失败: {doc_id}"}
+    doc_title = detail.get("title", f"material_{doc_id}")
+    return await _replace_with_document(
+        target_file, placeholder, doc_id, doc_title, project_name, output_dir,
+        ambiguous=False, ambiguous_note=None, detail=detail,
+    )
+
+
+async def _replace_with_document(
+    target_file: str,
+    placeholder: str,
+    doc_id: int,
+    doc_title: str,
+    project_name: str,
+    output_dir: str,
+    ambiguous: bool = False,
+    ambiguous_note: str | None = None,
+    detail: dict | None = None,
+) -> dict:
+    """内部函数：给定确定的 doc_id，完成图片下载、水印、占位符替换"""
+    # 2. 获取文档详情
+    if detail is None:
+        detail = await search.get_document_detail(doc_id)
+        if not detail:
+            return {"success": False, "message": f"获取文档详情失败: {doc_id}"}
+
+    # 2.1 有效期检查：过期/临期材料不静默插入，标注供人工确认
+    expiry_warning = None
+    expiry_date = detail.get("expiry_date")
+    is_expired = detail.get("is_expired")
+    if is_expired:
+        expiry_warning = f"⚠️ 该材料已过期（有效期至 {expiry_date}），插入投标文件前需人工确认是否更新材料或说明情况"
+    elif expiry_date:
+        try:
+            from datetime import date, datetime
+            exp = datetime.strptime(expiry_date, "%Y-%m-%d").date()
+            days_left = (exp - date.today()).days
+            if 0 <= days_left <= 30:
+                expiry_warning = f"⚠️ 该材料将于 {days_left} 天内过期（{expiry_date}），建议确认投标截止日前仍在有效期内"
+        except (ValueError, TypeError):
+            pass
 
     # 3. 找到图片附件
     current_revision = detail.get("current_revision")
@@ -331,6 +424,9 @@ async def replace_placeholder(
             "message": f"成功替换占位符",
             "image_path": output_path,
             "document_title": doc_title,
+            "ambiguous": ambiguous,
+            "ambiguous_note": ambiguous_note,
+            "expiry_warning": expiry_warning,
         }
     except Exception as e:
         return {"success": False, "message": f"更新文件失败: {e}"}
@@ -339,6 +435,7 @@ async def replace_placeholder(
 async def replace_all_placeholders(
     directory: str = "响应文件",
     project_name: str = "",
+    auto_mode: bool = True,
 ) -> dict:
     """批量替换所有占位符
 
@@ -347,12 +444,19 @@ async def replace_all_placeholders(
     Args:
         directory: 扫描目录
         project_name: 项目名称（用于水印，如果为空则自动从分析报告提取）
+        auto_mode: 批量模式默认按自动模式处理歧义（不阻塞等待用户输入），
+            遇到多个匹配时取第一个但在 details 中标注 ambiguous=True，
+            汇总到 ambiguous_count，供质检环节（bid-assembly）复核；
+            如需交互式逐一确认，调用方应改用 replace_placeholder（auto_mode=False）
+            单独处理每个占位符
 
     Returns:
         {
             "success": bool,
             "replaced_count": int,
             "failed_count": int,
+            "ambiguous_count": int,  # 存疑替换数量，需人工复核
+            "expiry_warning_count": int,  # 过期/临期材料数量，需人工复核
             "details": [...]
         }
     """
@@ -370,6 +474,8 @@ async def replace_all_placeholders(
 
     replaced_count = 0
     failed_count = 0
+    ambiguous_count = 0
+    expiry_warning_count = 0
     details = []
 
     for md_file in md_files:
@@ -397,18 +503,30 @@ async def replace_all_placeholders(
                     query=material_name,
                     project_name=project_name,
                     output_dir=directory,
+                    auto_mode=auto_mode,
                 )
 
                 if result["success"]:
                     replaced_count += 1
+                    if result.get("ambiguous"):
+                        ambiguous_count += 1
+                    if result.get("expiry_warning"):
+                        expiry_warning_count += 1
                     details.append({
                         "file": str(md_file),
                         "placeholder": full_placeholder,
                         "query": material_name,
                         "status": "success",
                         "image": result.get("image_path"),
+                        "ambiguous": result.get("ambiguous", False),
+                        "ambiguous_note": result.get("ambiguous_note"),
+                        "expiry_warning": result.get("expiry_warning"),
                     })
                     print(f"    ✓ 成功")
+                    if result.get("ambiguous_note"):
+                        print(f"    ⚠️ {result['ambiguous_note']}")
+                    if result.get("expiry_warning"):
+                        print(f"    {result['expiry_warning']}")
                 else:
                     failed_count += 1
                     details.append({
@@ -417,6 +535,8 @@ async def replace_all_placeholders(
                         "query": material_name,
                         "status": "failed",
                         "error": result.get("message"),
+                        "ambiguous": result.get("ambiguous", False),
+                        "candidates": result.get("candidates"),
                     })
                     print(f"    ✗ 失败: {result.get('message')}")
 
@@ -428,6 +548,8 @@ async def replace_all_placeholders(
         "success": True,
         "replaced_count": replaced_count,
         "failed_count": failed_count,
+        "ambiguous_count": ambiguous_count,
+        "expiry_warning_count": expiry_warning_count,
         "total_files": len(md_files),
         "details": details,
         "project_name": project_name,
@@ -439,6 +561,12 @@ def replace_placeholder_sync(*args, **kwargs) -> dict:
     """同步版本的 replace_placeholder"""
     import asyncio
     return asyncio.run(replace_placeholder(*args, **kwargs))
+
+
+def replace_placeholder_by_id_sync(*args, **kwargs) -> dict:
+    """同步版本的 replace_placeholder_by_id"""
+    import asyncio
+    return asyncio.run(replace_placeholder_by_id(*args, **kwargs))
 
 
 def replace_all_placeholders_sync(*args, **kwargs) -> dict:

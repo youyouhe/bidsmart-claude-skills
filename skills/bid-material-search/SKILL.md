@@ -37,6 +37,26 @@ MATERIALHUB_API_KEY=mh-agent-xxx...
 
 **无需额外配置** - 与 MCP server 共享同一配置
 
+### 🚨 服务可用性检测（每次触发本 skill 时必须先执行，不可跳过）
+
+本 skill 与 bid-analysis 依赖的 DocScan 不同：**没有可用的本地回退方案**——材料搜索、扫描件替换等能力完全依赖 MaterialHub API 提供的实际数据（企业资质、证书扫描件），这些数据不存在于工作目录本地文件中，无法像 DocScan 离线时那样"改用 python-docx 本地解析"。因此 MaterialHub 不可用时，本 skill 唯一正确的做法是**明确告知用户当前无法提供该服务**，而不是尝试降级、编造、或跳过检测直接报错。
+
+**检测方法**（在执行任何搜索/提取/替换操作前）：
+```bash
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8201/health
+```
+或直接调用一次任意 MCP tool（如 `list_doc_types`），若返回连接错误即视为不可用。
+
+**检测结果的处理**：
+- **返回 HTTP 200** → 服务在线，正常执行用户请求的搜索/提取/替换操作
+- **连接失败/超时/非 200**（包括本 skill 早期版本文档中提到的 `ImportError`、认证失败等根本无法访问服务的情况）→ **立即停止，明确告知用户**：
+
+  > MaterialHub 服务（`http://localhost:8201`）当前无法访问，本 skill 依赖该服务提供的实际资质材料数据，无法在离线状态下生成或猜测扫描件内容。当前无法完成您要求的材料检索/占位符替换操作。请确认 MaterialHub 服务已启动，或检查 `MATERIALHUB_API_URL`/`MATERIALHUB_API_KEY` 配置后重试。
+
+  **不可**：编造材料数据、留空处理后假装已完成、或在未告知用户的情况下静默跳过占位符替换。占位符留空是可以接受的结果（用户知情后可后续手动处理），但"看起来完成了但其实没有真实数据支撑"是不可接受的。
+
+- **AUTO_MODE（bid-manager S7 阶段调用）下的处理**：不能停下来等待用户交互，但仍必须在完成状态摘要的 `状态` 字段标注 `FAILED`（而非 `SUCCESS`），并在摘要中写明"MaterialHub 服务不可用，本阶段未执行任何替换"，供 bid-manager 决定是否跳过本阶段继续流程（参考 CLAUDE.md"Graceful degradation"原则：可选服务不可用时应跳过并警告，不是静默视为成功）。
+
 ## 主要功能
 
 ### 1. 材料搜索
@@ -151,7 +171,11 @@ data = extract_person_data_sync("周杨")
 
 ### 3. 占位符替换
 
-#### 替换单个占位符
+**🚨 关键原则：搜索命中多个候选材料时，不静默取第一个。**
+
+`smart_search` 的多级回退策略（同义词、去后缀、关键词展开）越"智能"，越容易在词义模糊时匹配到不止一份材料（如公司改过名、同类证书有多个版本）。放错扫描件到最终投标文件是本 skill 最严重的失败模式（比"没找到"更糟——"没找到"至少占位符还留在文档里提醒有遗漏，放错则是悄悄插入了错误内容）。
+
+#### 替换单个占位符（交互模式，非 AUTO_MODE 时优先使用）
 
 ```python
 from bid_material_search.replace import replace_placeholder_sync
@@ -161,26 +185,49 @@ result = replace_placeholder_sync(
     placeholder="【此处插入营业执照扫描件】",
     query="营业执照",
     project_name="清华房屋土地数智化平台",  # 可选，用于水印
-    output_dir="响应文件"
+    output_dir="响应文件",
+    auto_mode=False,  # 非 AUTO_MODE 时设为 False，遇到歧义会返回候选列表而非静默替换
 )
 
-# 返回格式
+# 情况1：唯一匹配，直接替换成功
 # {
 #     "success": True,
 #     "message": "成功替换占位符",
 #     "image_path": "响应文件/营业执照_珞信通达.png",
-#     "document_title": "营业执照_珞信通达（北京）科技有限公司"
+#     "document_title": "营业执照_珞信通达（北京）科技有限公司",
+#     "ambiguous": False,
+#     "expiry_warning": None  # 或过期/临期提示文字
+# }
+
+# 情况2：多个匹配，需人工确认——此时向用户展示 candidates，
+# 询问用哪一个，再用 replace_placeholder_by_id_sync 传入用户选定的 id 完成替换
+# {
+#     "success": False,
+#     "ambiguous": True,
+#     "message": "'营业执照' 匹配到 2 个材料，需人工确认使用哪一个",
+#     "candidates": [
+#         {"id": 5, "title": "营业执照_珞信通达", "folder": "/企业资质/营业执照", ...},
+#         {"id": 12, "title": "营业执照_旧名称", "folder": "/企业资质/营业执照(历史)", ...}
+#     ]
 # }
 ```
 
-#### 批量替换所有占位符
+**遇到 `ambiguous: True` 时的处理方法**：
+1. 将 `candidates` 列表（含 title、folder、entity_names、expiry_date）展示给用户
+2. 如果候选之间差异明显（如文件夹路径提示一个是"历史"版本），可先用 `browse_folder` MCP tool 查看该文件夹结构辅助判断，但**不得替用户做最终选择**
+3. 用户确认后，调用 `replace_placeholder_by_id_sync(target_file=..., placeholder=..., doc_id=用户选定的id, ...)` 完成替换
+
+**过期检查（`expiry_warning` 字段）**：只要材料 `is_expired=True` 或 30 天内到期，返回结果会带上 `expiry_warning` 提示。即使替换本身成功（图片已插入），也必须把这条提示展示给用户，不可因为"success: True"就忽略——过期证书插入投标文件可能导致废标，这是比格式问题更严重的风险。
+
+#### 批量替换所有占位符（AUTO_MODE，由 bid-manager 在 S7 阶段调用）
 
 ```python
 from bid_material_search.replace import replace_all_placeholders_sync
 
 result = replace_all_placeholders_sync(
     directory="响应文件",
-    project_name="清华房屋土地数智化平台"  # 可选，留空则自动从分析报告提取
+    project_name="清华房屋土地数智化平台",  # 可选，留空则自动从分析报告提取
+    auto_mode=True,  # 批量场景不能阻塞等待用户输入，遇到歧义取第一个但标注存疑
 )
 
 # 返回格式
@@ -188,11 +235,14 @@ result = replace_all_placeholders_sync(
 #     "success": True,
 #     "replaced_count": 12,
 #     "failed_count": 2,
+#     "ambiguous_count": 3,       # 存疑替换数量（AUTO_MODE下自动选取但未经确认）
+#     "expiry_warning_count": 1,  # 过期/临期材料数量
 #     "total_files": 10,
-#     "project_name": "清华房屋土地数智化平台",
 #     "details": [...]
 # }
 ```
+
+**⚠️ AUTO_MODE 下的歧义和过期材料不是"已解决"，而是"延后到质检环节"**：`ambiguous_count > 0` 或 `expiry_warning_count > 0` 时，必须在完成状态摘要中明确列出，供 S8 质检（bid-assembly）复核这些存疑替换是否正确、过期材料是否需要更新。不可因为 `replaced_count` 达标就视为完全成功。
 
 **占位符格式**：
 - `【此处插入营业执照扫描件】`
@@ -223,6 +273,31 @@ add_watermark(
     font_size=20,
     margin=15
 )
+```
+
+## 可用的 MaterialHub MCP Tools（Claude 直接调用，不经过 Python 脚本层）
+
+除了上述 Python 函数（供脚本化调用），Claude 在会话中还可以直接调用 MaterialHub 提供的 MCP tools。这些工具与 Python 脚本走的是同一个 MaterialHub 后端，但接口形式不同（MCP tool 返回格式化文本，适合直接阅读；Python 函数返回结构化 dict，适合程序处理）。**遇到 Python 脚本函数无法满足的场景（如需要浏览文件夹结构、查过期清单）时，应优先直接调用对应的 MCP tool，而非在 Python 脚本里重新实现一套。**
+
+| MCP Tool | 用途 | 本 skill 中的适用场景 |
+|---|---|---|
+| `search_documents` | 全文关键词搜索文档 | 对应 `search.py` 的能力，Python 层已封装 |
+| `get_document_detail` | 获取单个文档完整详情 | 对应 `search.py`，Python 层已封装 |
+| `get_company_complete` | 一次性获取公司完整信息 | 对应 `extract.py`，Python 层已封装 |
+| `get_person_complete` | 一次性获取人员完整信息 | 对应 `extract.py`，Python 层已封装 |
+| `list_entity_documents` | 查询某公司/人员关联的全部文档 | 消歧场景：多个候选材料对应不同实体时，用此工具确认哪个实体是当前项目的投标主体 |
+| `browse_folder` | 浏览文件夹树/文件夹内文档列表 | 消歧场景：候选材料位于不同文件夹（如"营业执照"与"营业执照(历史版本)"），浏览文件夹结构辅助判断，或不传参数查看整体分类结构 |
+| `list_doc_types` | 列出系统所有文档类型分类 | 校验 `search_materials` 的 `doc_type` 参数值是否真实存在，避免凭猜测传入不存在的 code |
+| `list_expiring_documents` | 查询即将过期/已过期的文档 | **插入扫描件前的主动检查**：批量替换开始前，先调用一次 `list_expiring_documents(days=30)`，将结果与本次要处理的占位符对应的材料交叉核对，对命中的项在替换时优先提示用户，而不是等 `replace_placeholder` 逐个返回 `expiry_warning` 才发现 |
+| `add_document` | 导入文件并创建文档记录 | 不属于本 skill 职责范围——材料入库是 `bid-material-extraction` 的工作，本 skill 只搜索/使用已入库材料，不创建新材料 |
+
+**推荐用法**：批量处理前（`replace_all_placeholders` 调用前），先用 `list_expiring_documents` 做一次全局检查：
+
+```
+调用 list_expiring_documents(days=30)
+若返回的过期/临期文档标题命中本次待处理的占位符查询词，
+在开始批量替换前先向用户展示这批风险材料清单，
+询问是否继续使用（可能需要用户先去 MaterialHub 更新材料）或跳过这些占位符。
 ```
 
 ## 使用场景
@@ -261,7 +336,7 @@ for person in company_data['persons']:
 
 ### 场景 3: bid-manager S7 阶段调用
 
-在 bid-manager 的 S7（扫描件）阶段，批量替换所有占位符：
+在 bid-manager 的 S7（扫描件）阶段，批量替换所有占位符（AUTO_MODE，不可交互）：
 
 ```python
 from bid_material_search.replace import replace_all_placeholders_sync
@@ -272,15 +347,20 @@ with open("pipeline_progress.json") as f:
     progress = json.load(f)
     project_name = progress.get("project_name", "")
 
-# 批量替换
+# 批量替换（auto_mode=True：遇到歧义不阻塞，取第一个但标注存疑供质检复核）
 result = replace_all_placeholders_sync(
     directory="响应文件",
-    project_name=project_name
+    project_name=project_name,
+    auto_mode=True,
 )
 
 print(f"成功替换: {result['replaced_count']} 个")
 print(f"失败: {result['failed_count']} 个")
+print(f"存疑（歧义未确认）: {result['ambiguous_count']} 个 — 需 S8 质检复核")
+print(f"过期/临期材料: {result['expiry_warning_count']} 个 — 需 S8 质检复核")
 ```
+
+**S7 阶段的完成状态摘要必须包含 `ambiguous_count` 和 `expiry_warning_count`**，供 bid-assembly（S8质检）读取并列入核对报告，不可只汇报 `replaced_count`/`failed_count` 而遗漏这两项存疑指标。
 
 ## 性能对比
 
@@ -382,6 +462,37 @@ from bid_material_search.extract import extract_company_data_sync
 
 company_data = extract_company_data_sync(company_name)
 # 使用 company_data 填充模板
+```
+
+## 完成状态
+
+批量替换完成后（bid-manager S7 阶段调用时），输出以下结构化状态摘要：
+
+```
+--- BID-MATERIAL-SEARCH COMPLETE ---
+处理文件数: {total_files}
+成功替换: {replaced_count}
+失败: {failed_count}
+存疑（AUTO_MODE下歧义未经人工确认）: {ambiguous_count}，需S8质检复核
+过期/临期材料: {expiry_warning_count}，需S8质检复核
+输出目录: 响应文件/
+状态: SUCCESS
+--- END ---
+```
+
+**若前置的服务可用性检测失败**（MaterialHub 不可访问），改用以下摘要，不可仍标注 `SUCCESS`：
+
+```
+--- BID-MATERIAL-SEARCH COMPLETE ---
+处理文件数: 0
+成功替换: 0
+失败: 0
+存疑: 0
+过期/临期材料: 0
+输出目录: 响应文件/
+状态: FAILED
+失败原因: MaterialHub 服务（http://localhost:8201）不可访问，本阶段未执行任何替换，占位符原样保留
+--- END ---
 ```
 
 ## 版本历史
