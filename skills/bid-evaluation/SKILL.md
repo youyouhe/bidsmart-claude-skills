@@ -3,6 +3,7 @@ name: bid-evaluation
 description: >
   基于招标文件评分标准，生成投标可行性评估报告。
   自动评估客观项（资质、业绩等），为主观项（技术方案、服务方案）生成打分表供用户评估。
+  一次性完成评估报告（Markdown）+ 结构化数据（JSON）+ 可交互打分页面（HTML）三种产出。
   帮助用户决策是否投标。
   当用户要求评估投标可行性、分析中标概率、生成投标决策报告时触发。
 ---
@@ -299,11 +300,11 @@ EOF
 
 输出 `投标评估报告.md`（人类可读格式）。
 
-**注意**：JSON 格式由独立的 `bid-eval-to-json` skill 生成，确保任务职责单一，提高成功率。
+**注意**：本 skill 一次性完成 Markdown 报告 + JSON 数据 + HTML 打分页面三项产出（见第 6、7 步），不再依赖独立的 `bid-eval-to-json` skill——该 skill 的 Markdown→JSON 转换逻辑已完全并入本 skill 的第 6 步。
 
 #### 5.1 Markdown 格式规范
 
-输出文件必须包含以下结构化内容（供后续转换为 JSON）：
+输出文件必须包含以下结构化内容（供第 6 步转换为 JSON）：
 
 ```json
 {
@@ -505,22 +506,50 @@ Markdown 格式示例：
 | **总计** | **7小时** |
 ```
 
-### 6. 输出文件
+### 6. 生成 JSON 数据
+
+**核心策略**：直接读取刚生成的 Markdown 内容（同一次对话内已在上下文中，无需重新读文件）→ 直接输出 JSON。不写解析脚本，不用正则，不分步解析——评估报告 Markdown 通常 200-400 行，完全在上下文窗口内，直接阅读语义后一次性写出完整 JSON。
+
+用 `write` 工具输出 `投标评估报告.json`，字段结构与 5.1 中的 JSON 示例一致。**字段提取规则**：
+
+- **项目基本信息**：从"一、项目基本信息"表格中提取 `projectName`, `projectBudget`, `deadline`, `totalScore`（提取纯数字，如"100分"→100）
+- **客观项**（`objectiveItems`）：来源于"二、客观条件评估"下各小节 + 客观项小计表格；`confidence` 根据标记推断（✅→"高"，⚠️→"中"，❌→"低"）；`scoringRule` 为评分规则原文（精简版）；若存在"待确认项"表格，将"需确认内容"合并到 `notes`
+- **主观项**（`subjectiveItems`）：来源于"三、主观条件评估"下各小节；识别模式 `### 3.X 标题（N分）`；若有二级拆分子项，每个子项独立且 `parentCategory` = 大项名称，否则 `parentCategory` 为 `null`；`assessmentGuide.question`/`criteria`/`options` 分别来自"评估问题"/"评估标准"/"打分选项"；`userScore`、`userNotes` 均为 `null`
+- **得分估算**（`autoEstimation`）：`objectiveScoreMax`/`subjectiveScoreMax` 为对应 items 的 `score` 之和；`objectiveScoreExpected` 为客观项 `expectedScore` 之和（跳过 null）；`subjectiveScoreExpected`/`totalScoreExpected` 均为 `null`；`totalScoreMax` = `objectiveScoreMax` + `subjectiveScoreMax`
+
+**质量要求**：
+1. 所有主观项必须有 `options` 数组，且每个 option 必须有 `label`、`score`、`desc`
+2. 数值一致性：`autoEstimation` 中的 Max 值必须等于对应 items 的 `score` 之和
+3. 不要编造内容：所有字段都从 Markdown 原文提取，不要补充额外信息
+4. JSON 必须合法：无尾逗号，中文引号 `“”` 需要用 Unicode 转义，否则会被误认为 JSON 字符串结束符
+
+**验证**：
+```bash
+python3 -c "import json; json.load(open('投标评估报告.json'))"
+```
+
+### 7. 生成 HTML 打分页面
+
+调用 `bid-eval-html` skill，传入刚生成的 `投标评估报告.json`（或直接传入内存中的同一份数据），生成单文件自包含的 `投标评估报告.html`（内嵌 JS 完成客观项展示 + 主观项打分 + 实时求和，浏览器本地交互，无需后端/无需保存机制）。
+
+该 skill 只负责渲染，不重新判断/编造评估内容——其输入必须是本 skill 第 6 步产出的 JSON 数据，不可让 `bid-eval-html` 自行猜测或补全缺失字段。
+
+### 8. 输出文件
 
 - `投标评估报告.md` - 人类可读格式（供用户阅读/打印/存档）
+- `投标评估报告.json` - 结构化数据（第 6 步生成，供 HTML 页面及其他下游消费）
+- `投标评估报告.html` - 可交互打分页面（第 7 步由 `bid-eval-html` 生成）
 
-**注意**：JSON 格式由后续 `bid-eval-to-json` skill 自动生成。
-
-### 7. 用户交互流程
+### 9. 用户交互流程
 
 ```
 1. bid-analysis 完成 → 生成分析报告.md
-2. bid-evaluation 执行 → 生成投标评估报告.md
-3. bid-eval-to-json 执行 → 生成投标评估报告.json（自动）
-4. 前端展示评估报告 → 用户查看客观项评估
-5. 用户填写主观项打分表 → 提交
-6. 系统计算预期总分 → 给出投标建议
-7. 用户决策：
+2. bid-evaluation 执行 → 一次性生成：
+   a. 投标评估报告.md（人类可读）
+   b. 投标评估报告.json（结构化数据，内部转换，无需单独调用其他skill）
+   c. 投标评估报告.html（可交互打分页面，内部调用 bid-eval-html 生成）
+3. 用户打开 投标评估报告.html → 查看客观项评估 + 逐项打分主观项 → 页面实时计算预期总分
+4. 用户决策：
    - 决定投标 → 继续后续流程（技术标编写...）
    - 放弃投标 → 结束，标记项目状态为"已放弃"
    - 暂缓决策 → 保存评估结果，稍后决定
@@ -654,12 +683,14 @@ Markdown 格式示例：
 主观项: {N}个
 客观项预期得分: {X}/{Y}
 主观项待评估: {N}个
-输出文件: 投标评估报告.md
+输出文件: 投标评估报告.md, 投标评估报告.json, 投标评估报告.html
 状态: WAITING_USER_ASSESSMENT
 
 自检结果:
 ✅ 所有客观项包含 scoringRule 字段
 ✅ 所有主观项包含 scoringRule 字段
 ✅ 无嵌套结构
+✅ JSON 语法校验通过
+✅ HTML 打分页面已生成（bid-eval-html）
 --- END ---
 ```
