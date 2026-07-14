@@ -22,7 +22,6 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const archifyBin = path.join(__dirname, 'archify', 'bin', 'archify.mjs');
-const watermarkScript = path.join(__dirname, 'watermark.py');
 const PORT = Number(process.env.ARCHIFY_PORT) || 18800;
 
 // ── Puppeteer discovery ────────────────────────────────────────────────────
@@ -87,10 +86,8 @@ async function renderToPng(type, diagramData, scale = 3) {
       await browser.close();
     }
 
-    if (fs.existsSync(watermarkScript)) {
-      spawnSync('python3', [watermarkScript, '--auto-project-name', tmpPng, '-o', tmpPng], { encoding: 'utf8' });
-    }
-
+    // NOTE: watermark is applied by the client (render_archify.mjs), not here —
+    // so the same single watermark is stamped regardless of HTTP vs local path.
     return fs.readFileSync(tmpPng);
   } finally {
     for (const f of [tmpJson, tmpHtml, tmpPng]) {
