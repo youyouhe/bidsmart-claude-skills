@@ -63,6 +63,25 @@ grep -rl "【此处插入.*图】" 响应文件/*.md 2>/dev/null
   - 用户不同意 → 暂停本次任务
 - **AUTO_MODE=true** 时：不可交互等待，直接在完成状态摘要中标注 `FAILED`，说明"未找到图表占位符"，交由 bid-manager 处理
 
+### 0.1 水印决策（询问用户）
+
+渲染前询问用户是否为图表添加项目名称水印（右下角半透明项目名，防投标材料被滥用）：
+
+```
+📋 图表水印设置
+本次生成的图表是否需要添加项目名称水印？
+1️⃣ 添加水印（推荐，项目名自动从 分析报告.md 提取）
+2️⃣ 不添加水印
+```
+
+- 用户选择**添加**（或默认）→ 正常渲染，脚本自动打水印
+- 用户选择**不添加** → 后续所有渲染命令前缀环境变量 `NO_WATERMARK=1`，例如：
+  ```bash
+  NO_WATERMARK=1 node scripts/render_archify.mjs architecture input.json output.png
+  NO_WATERMARK=1 bash scripts/render.sh input.mmd output.png
+  ```
+- **AUTO_MODE=true**（bid-manager 调度，无法交互）→ 默认**添加水印**（保持防滥用），并在完成状态摘要中注明
+
 ### 1. 扫描占位符
 
 在目标 markdown 文件中查找 `【此处插入XX图】` 格式的占位符。

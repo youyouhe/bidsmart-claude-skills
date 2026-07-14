@@ -140,7 +140,9 @@ if (!usedServer) {
   await localRender();
 }
 
-if (fs.existsSync(watermarkScript)) {
+if (process.env.NO_WATERMARK) {
+  console.log('Watermark skipped (NO_WATERMARK set)');
+} else if (fs.existsSync(watermarkScript)) {
   const wm = spawnSync('python3', [watermarkScript, '--auto-project-name', output, '-o', output], { encoding: 'utf8' });
   if (wm.stdout?.includes('Watermarked')) {
     console.log(`Added watermark to ${output}`);
