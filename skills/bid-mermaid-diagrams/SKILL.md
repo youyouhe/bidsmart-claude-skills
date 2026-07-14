@@ -6,8 +6,8 @@ description: >
   Mermaid 代码块直接渲染（上游 bid-tech-proposal 已按规范编写好代码），
   兼容处理旧格式的 ASCII 图转换，渲染为高清 PNG，
   然后替换占位符为 markdown 图片引用。
-  架构类图表（系统架构图/总体架构图/部署架构图/拓扑图）默认改用内置的 archify 渲染引擎，
-  效果更专业；流程图/组织架构图/甘特图/ER图仍走 Mermaid+mmdc 路径。
+  架构图/流程图/时序图/数据流图/状态机默认改用内置的 archify 渲染引擎，
+  效果更专业；甘特图和 ER 图 archify 不支持，仍走 Mermaid+mmdc 路径。
   当用户要求画图、生成图表、替换图表占位符、为技术方案/实施方案画架构图时触发。
 ---
 
@@ -20,15 +20,15 @@ description: >
 - Node.js（已预装）
 - @mermaid-js/mermaid-cli（已预装，禁止自行安装）
 - mermaid_render 工具（系统内置扩展，优先使用）
-- archify（`scripts/archify/`，已随本 skill 内置，无需安装，架构类图表的渲染引擎）
+- archify（`scripts/archify/`，已随本 skill 内置，无需安装，架构图/流程图/时序图/数据流图/状态机的渲染引擎）
 - archify render server（`scripts/archify-server.mjs`，需在沙盒外预先启动，端口 18800）
 
 ## 核心工具
 
 - **mermaid_render**：系统内置工具，直接传入 Mermaid 代码和输出路径即可渲染，优先使用（流程图/组织架构图/甘特图/ER图走这条路径）
-- 渲染脚本：`scripts/render.sh`（备用方案，Mermaid+mmdc 路径）
+- 渲染脚本：`scripts/render.sh`（甘特图/ER 图专用，Mermaid+mmdc 路径）
 - 主题配置：`scripts/mermaid.json`（蓝色专业主题，支持中文）
-- **archify 渲染脚本**：`scripts/render_archify.mjs`（架构类图表走这条路径，优先通过 HTTP 调用沙盒外的 archify-server，服务不在线才尝试本地 Puppeteer）
+- **archify 渲染脚本**：`scripts/render_archify.mjs`（架构图/流程图/时序图/数据流图/状态机走这条路径，优先通过 HTTP 调用沙盒外的 archify-server，服务不在线才尝试本地 Puppeteer）
 
 ## Archify Server 启动方式
 
@@ -95,106 +95,166 @@ grep -rl "【此处插入.*图】" 响应文件/*.md 2>/dev/null
 - 如果文字描述过于简略（如只有一句话），生成的图表也应保持简单（只画文字描述中明确提到的元素），不得为了"图表看起来更专业"而虚构额外的分层、人员数量、技术选型等细节
 - 如果连简单的图表都无法从上下文中获得依据（完全没有相关描述），应跳过该占位符并在处理汇报中列出，提示需要先在正文补充相关描述，而不是直接生成一张凭空想象的图
 
-### 3. 编写/校验 Mermaid 代码
+### 3. 判定图表类型与渲染路径
 
-若走方式A（已有代码块）：仅做语法校验和明显错误修正，见下方注意事项，不重新设计结构。
-若走方式B/C（需要新写代码）：根据步骤2确定的内容编写 `.mmd` 文件。Mermaid 代码要求：
+先根据占位符内容判定走哪条渲染路径。**除甘特图和 ER 图外，其余全部走 archify**（出图质量优于 Mermaid）：
 
-- **中文标签**：所有节点文字使用中文
-- **层次清晰**：用 subgraph 表达分层/分组关系
-- **配色通过主题控制**：不在 mmd 文件中硬编码颜色（除非特别需要区分）
+| 占位符内容 | 渲染路径 | archify type |
+|-----------|---------|-------------|
+| 系统架构图 / 总体架构图 / 分层架构 | archify | `architecture` |
+| 部署架构图 / 网络拓扑图 | archify | `architecture` |
+| 对接 / 集成架构图 | archify | `architecture` |
+| 组织架构图 / 三员管理架构 | archify | `architecture` |
+| 流程图 / 审批流 / 故障处理 / 运维流程 | archify | `workflow` |
+| 时序图 / 服务流程时序 / 请求生命周期 | archify | `sequence` |
+| 数据流图 / 数据流向 / ETL 流向 | archify | `dataflow` |
+| 状态机 / 生命周期图 / 状态转换 | archify | `lifecycle` |
+| 方法论 / 阶段示意图 | archify | `workflow`（或 `lifecycle`） |
+| **甘特图（项目实施进度）** | **Mermaid** | — `gantt` |
+| **ER 图（数据库实体关系）** | **Mermaid** | — `erDiagram` |
 
-#### 图表类型对照
+判定补充：
+- 描述"静态组件/服务关系"→ `architecture`；"动作/步骤/时序"→ `workflow`/`sequence`；"数据流向"→ `dataflow`；"状态转换"→ `lifecycle`
+- 拿不准时，优先 `architecture`（布局最稳）或 `workflow`（覆盖面最广）
 
-| 占位符内容 | Mermaid 图类型 | 说明 |
-|-----------|---------------|------|
-| XX架构图 | `graph TD` | 分层架构，用 subgraph 表达层 |
-| XX拓扑图 | `graph TD` | 网络拓扑，用 subgraph 表达区域 |
-| XX流程图 | `graph TD` | 流程图，用菱形表达判断 |
-| ER图 | `erDiagram` | 实体关系图 |
-| 甘特图 | `gantt` | 项目进度甘特图 |
-| 组织架构图 | `graph TD` | 树形组织结构 |
-| 对接/集成架构图 | `graph LR` | 左右布局，表达系统间关系 |
-| 方法论/示意图 | `graph LR` | 流程或阶段示意 |
+### 3a. archify 编写与渲染（主路径）
 
-#### Mermaid 编写注意事项
+走 archify 的图，**不编写 `.mmd` 文件**，改为编写 archify JSON IR 文件 `{描述}.{type}.json`（type 见步骤3表）。每种 type 用不同字段定位节点——**理解各自的 layout budget 是写对的关键**。
 
-1. **节点 ID 用英文**，显示标签用中文括号包裹：`A[系统总体架构]`
-2. **subgraph 标题用中文**：`subgraph 基础设施层`
-3. **避免特殊字符**：标签中避免 `()` `{}` `[]` 等 mermaid 语法字符，用全角替代
-4. **连接线标签简短**：`A -->|数据同步| B`
-5. **gantt 图日期格式**：`YYYY-MM-DD` 或相对周数
-6. **erDiagram 关系**：`PATIENT ||--o{ NURSING_RECORD : has`
-7. **节点文字过长时换行**：在引号标签中换行无效，应缩短文字或拆分节点
+#### architecture（架构图）—— 用 grid 布局，不手算坐标
+```json
+{
+  "schema_version": 1, "diagram_type": "architecture",
+  "meta": { "title": "系统总体架构", "subtitle": "分层架构" },
+  "layout": { "mode": "grid", "cols": 4, "cellW": 160, "cellH": 70, "gapX": 40, "gapY": 40, "origin": [60, 60] },
+  "components": [
+    { "id": "web", "type": "frontend", "label": "Web前端", "row": 0, "col": 0 },
+    { "id": "db",  "type": "database", "label": "数据库",  "row": 0, "col": 3 }
+  ],
+  "connections": [{ "from": "web", "to": "db", "label": "读写" }],
+  "boundaries": [], "cards": []
+}
+```
+- 组件用 `row`/`col` 定位，**不写 `pos`/`size`**（grid 自动算）；`cols` 按最大 col+1 取值（3–6），`cellW ≥ 150`
+- `type`：`frontend`/`backend`/`database`/`cloud`/`security`/`messagebus`/`external`
 
-### 3.5 架构类图表：改用 archify 渲染（默认路径）
+#### workflow（流程图）—— 用 lane 泳道 + col，⚠️ 列间距不均
+```json
+{
+  "schema_version": 1, "diagram_type": "workflow",
+  "meta": { "title": "故障处理流程" },
+  "lanes": [{ "id": "onsite", "label": "现场团队" }, { "id": "expert", "label": "专家团队", "variant": "exception" }],
+  "mainPath": ["receive", "handle", "resolve"],
+  "nodes": [
+    { "id": "receive", "lane": "onsite", "col": 1, "type": "backend", "label": "接收告警" },
+    { "id": "handle",  "lane": "onsite", "col": 3, "type": "backend", "label": "现场处理" },
+    { "id": "resolve", "lane": "onsite", "col": 5, "type": "security", "label": "问题解决" }
+  ],
+  "edges": [{ "from": "receive", "to": "handle" }, { "from": "handle", "to": "resolve" }],
+  "cards": []
+}
+```
+- 节点用 `lane` + `col`（0–5）定位，省略 viewBox（高度自动算）
+- **⚠️ 6 列 x 间距不均**：col 0→1(132)、2→3(130)、4→5(125) 宽松；**col 1↔2(80)、3↔4(70) 太窄**。同一 lane 的连续节点必须用宽松列（如 1,3,5 或 0,2,4），否则 92px 默认节点重叠
+- 默认节点 92×52（有 `tag` 时高 68）；跨 lane 连线用 `route: "drop"`；标签压节点就删 `label`
+- `lane.variant: "exception"` 用于异常/重试/失败泳道
 
-当占位符内容属于**架构类**（系统总体架构图、总体架构图、部署架构图、拓扑图、对接/集成架构图——即上表中判定为 `graph TD`/`graph LR` 且描述的是组件/服务/基础设施关系而非流程步骤的图）时，默认改用内置的 archify 渲染引擎代替 mmdc，效果更专业（原生 4× 高清栅格化、CJK 文字宽度自动测量、深浅色主题一致）。
+#### sequence（时序图）—— participants 顶部排列，message 按 y 递增
+```json
+{
+  "schema_version": 1, "diagram_type": "sequence",
+  "meta": { "title": "请求生命周期", "viewBox": [920, 760] },
+  "participants": [
+    { "id": "web", "type": "frontend", "label": "前端" },
+    { "id": "api", "type": "backend", "label": "API" }
+  ],
+  "messages": [
+    { "from": "web", "to": "api", "y": 200, "label": "GET /data", "variant": "emphasis" },
+    { "from": "api", "to": "web", "y": 280, "label": "200 JSON", "variant": "return" }
+  ],
+  "segments": [], "activations": [], "cards": []
+}
+```
+- participants 最多 8 个；超过就拆图或合并角色
+- message 的 `y` ∈ [160, height−83]，共享水平空间的两条间隔 ≥28px，箭头水平跨度 ≥60px
+- message 太密 → 加大 `meta.viewBox` 高度（默认 [920,760]）
+- `variant`：`emphasis` 主路径 / `return` 响应 / `dashed` 异步 / `security` 鉴权
 
-**判定规则**：
-- 占位符文字含"架构""拓扑""部署图""集成架构"→ 走 archify
-- 占位符文字含"流程""组织架构""甘特""ER图""方法论示意"→ 仍走 3./4. 的 Mermaid+mmdc 路径，不受本节影响
-- 拿不准时，看图表描述的是"静态组件关系"（archify）还是"动作/时序/层级隶属"（Mermaid）
+#### dataflow（数据流图）—— 用 stage 阶段 + row 行
+```json
+{
+  "schema_version": 1, "diagram_type": "dataflow",
+  "meta": { "title": "数据流向", "viewBox": [940, 720] },
+  "stages": [{ "label": "采集" }, { "label": "处理" }, { "label": "存储" }],
+  "nodes": [
+    { "id": "src", "type": "frontend", "label": "数据源",   "stage": 0, "row": 0 },
+    { "id": "etl", "type": "backend",  "label": "ETL",      "stage": 1, "row": 0 },
+    { "id": "wh",  "type": "database", "label": "数据仓库",  "stage": 2, "row": 0 }
+  ],
+  "flows": [{ "from": "src", "to": "etl", "label": "原始数据" }, { "from": "etl", "to": "wh", "label": "清洗结果" }],
+  "cards": []
+}
+```
+- stages 只能 2–5 个；rows 5 个；节点用 `stage` + `row` 定位，默认 112×58
+- **flow 的 `label` 必填**（命名数据资产，如"原始数据"）；`classification` 标敏感度（如"PII"）
 
-**步骤（替代步骤3/4，仅用于架构类图表）：**
+#### lifecycle（状态机/生命周期）—— lane id 固定语义
+```json
+{
+  "schema_version": 1, "diagram_type": "lifecycle",
+  "meta": { "title": "工单生命周期", "viewBox": [980, 660] },
+  "lanes": [
+    { "id": "main", "label": "主流程" },
+    { "id": "event", "label": "中断处理" },
+    { "id": "terminal", "label": "终态" }
+  ],
+  "states": [
+    { "id": "created",  "type": "start",   "label": "已创建",   "lane": "main",     "col": 0, "step": "01" },
+    { "id": "handling", "type": "active",  "label": "处理中",   "lane": "main",     "col": 2, "step": "02" },
+    { "id": "paused",   "type": "waiting", "label": "挂起待补", "lane": "event",    "col": 1 },
+    { "id": "done",     "type": "success", "label": "完成",     "lane": "terminal", "col": 1 }
+  ],
+  "transitions": [
+    { "from": "created", "to": "handling" },
+    { "from": "handling", "to": "paused", "variant": "dashed" },
+    { "from": "handling", "to": "done", "variant": "emphasis" }
+  ],
+  "cards": []
+}
+```
+- lane id 固定语义：`main`（必需，顶部相位带）、`terminal`（底部结果带）、其他任意 id（中间事件带，总 lane ≤4）
+- main 带 col 0–4；event/terminal 带 col 0–2；状态用 `lane` + `col` 定位
+- 状态用 **`type`**（不是 variant）取值：`start`/`active`/`waiting`/`success`/`failure`；`step`（如 "01"）给 main 带状态标序号
+- 主生命周期沿 main 带水平铺设；transition 才用 `variant`（`emphasis`/`dashed`/`security`）
 
-1. **不编写 `.mmd` 文件**，改为编写 archify 的 JSON IR 文件 `{描述}.architecture.json`。
+#### 共通规则（所有 archify 类型）
+- `id` 必须英文，`label`/`title` 用中文
+- **忠实原则**：节点/连接/状态来自原始 Mermaid 代码块/ASCII 图/文字描述，不得凭空编造；`row`/`col`/`stage`/`y` 等排布由你定，但不能增删元素
+- 渲染命令统一（第1参数是步骤3表中的 type）：
+  ```bash
+  node scripts/render_archify.mjs <type> input.{type}.json output.png
+  # 可选第4参数指定截图缩放（默认 3）
+  node scripts/render_archify.mjs <type> input.{type}.json output.png 4
+  ```
+  脚本会：archify render → check 校验 → 沙盒外 Chrome 截图 → 自动水印
+- **校验失败不许跳过、不许切回 Mermaid**：报错会给具体建议（如 `Suggested fix: labelDy +58` 或 `skip a column`），按提示修 JSON 重跑
 
-   **⚠️ 必须使用 grid 布局模式（不要手算 `pos`/`size` 坐标）**：手算像素坐标极易导致标签与组件重叠、组件超出画布，archify 校验器会直接拒绝渲染。使用 grid 模式时，只需给每个组件写 `row`/`col` 整数，渲染器自动计算位置：
+#### 从已有 Mermaid 代码块转译
+占位符后若已有上游写的 Mermaid 代码块（步骤2 方式A），**不要直接用它渲染**，而是读懂其结构后转译成对应 archify type 的 JSON IR：
+- Mermaid `graph TD/LR`（组件关系）→ `architecture`；`graph TD`（流程步骤）→ `workflow`
+- Mermaid `sequenceDiagram` → `sequence`；`stateDiagram` → `lifecycle`
+- 转译时保留原图的节点集合和连接关系，按各 type 的 layout budget 重新排布位置（不改变节点/连接本身）
 
-   ```json
-   {
-     "schema_version": 1,
-     "diagram_type": "architecture",
-     "meta": { "title": "系统总体架构", "subtitle": "..." },
-     "layout": {
-       "mode": "grid",
-       "cols": 4,
-       "cellW": 160,
-       "cellH": 70,
-       "gapX": 40,
-       "gapY": 40,
-       "origin": [60, 60]
-     },
-     "components": [
-       { "id": "web",  "type": "frontend", "label": "Web前端",  "sublabel": "Vue3",       "row": 0, "col": 0 },
-       { "id": "gw",   "type": "backend",  "label": "API网关",  "sublabel": "鉴权/限流",   "row": 0, "col": 1 },
-       { "id": "svc",  "type": "backend",  "label": "业务服务", "sublabel": "SpringBoot", "row": 0, "col": 2 },
-       { "id": "db",   "type": "database", "label": "数据库",   "sublabel": "MySQL",      "row": 0, "col": 3 }
-     ],
-     "connections": [
-       { "from": "web", "to": "gw",  "label": "HTTPS" },
-       { "from": "gw",  "to": "svc" },
-       { "from": "svc", "to": "db",  "label": "SQL" }
-     ],
-     "boundaries": [],
-     "cards": []
-   }
-   ```
+### 3b. Mermaid 编写（仅甘特图 / ER 图）
 
-   **grid 参数说明**：
-   - `cols`：总列数（决定画布宽度，按最大 col+1 取值，通常 3–6）
-   - `cellW` / `cellH`：每格宽高（px），中文标签建议 `cellW ≥ 150`
-   - `gapX` / `gapY`：格间距，建议 30–50
-   - `origin`：左上角起始坐标，默认 `[60, 60]` 留出边距即可
-   - 组件只写 `row`/`col`，**不写 `pos`/`size`**——两者并存时 `pos` 优先，混用会产生坐标冲突
+只有甘特图和 ER 图走 Mermaid（archify 无此类型），编写 `.mmd` 文件：
+- **甘特图**：`gantt`，日期格式 `YYYY-MM-DD`
+- **ER 图**：`erDiagram`，关系 `PATIENT ||--o{ NURSING_RECORD : has`
+- 节点 ID 用英文、标签用中文；避免 `(){}[]` 等语法字符
 
-   **其他字段规则**：
-   - `type` 只能是 `frontend`/`backend`/`database`/`cloud`/`security`/`messagebus`/`external`
-   - `id` 必须英文（Schema 约束），`label`/`sublabel` 用中文
-   - **忠实原则**依然适用：节点集合、层级归属、连接关系来自原始 Mermaid/ASCII 图/文字描述，不得凭空编造；grid 的 `row`/`col` 是视觉排布，由你决定，但不能增删节点
-   - `connections` 中的 `label` 若文字较长容易与组件重叠，改成空（省略 `label` 字段）或用 `cards` 说明，比强行塞标签更稳
-2. **渲染**：
-   ```bash
-   node scripts/render_archify.mjs architecture input.architecture.json output.png
-   ```
-   脚本内部会：调用 archify 渲染出 HTML → 用 archify 自带的 `check` 做 schema/布局校验（校验失败会打印具体错误路径并退出，此时修正 JSON 后重跑，不要跳过校验直接使用）→ 用无头 Chrome 截图导出高清 PNG → 自动尝试添加水印（同 render.sh 逻辑，从 `分析报告.md` 提取项目名称）。
-   - 可选第4个参数指定截图缩放倍数（默认 3）：`node scripts/render_archify.mjs architecture input.json output.png 4`
-3. **产物同步**：与步骤5相同，只是被删除的源代码块换成了 `.architecture.json` 对应的说明块（如果占位符后确实写了 JSON 代码块作为草稿，也要一并清理），最终替换为图片引用。
+### 4. 渲染为 PNG（Mermaid+mmdc 路径，仅甘特图/ER 图）
 
-### 4. 渲染为 PNG（Mermaid+mmdc 路径，非架构类图表）
-
-将 `.mmd` 文件渲染为 PNG：
+archify 图表已在步骤 3a 渲染。本步只渲染步骤 3b 编写的甘特图/ER 图 `.mmd` 文件：
 
 ```bash
 # 单个文件
@@ -320,10 +380,17 @@ graph TD
 
 用户：把系统总体架构图画出来
 操作：
-1. 识别为架构类图表 → 走 archify 路径（步骤3.5）
-2. 编写 XX.architecture.json（components/connections，忠实于占位符前后已有的结构依据）
+1. 识别为架构类 → archify architecture（步骤3a）
+2. 编写 XX.architecture.json（grid 布局，忠实于占位符前后的结构依据）
 3. node scripts/render_archify.mjs architecture XX.architecture.json diagram-系统总体架构图.png
-4. 替换占位符，删除源 JSON 说明块
+4. 替换占位符，删除源代码块
+
+用户：把故障处理流程图画出来
+操作：
+1. 识别为流程图 → archify workflow（步骤3a）
+2. 编写 XX.workflow.json（lane 泳道 + col，同一泳道连续节点跳列）
+3. node scripts/render_archify.mjs workflow XX.workflow.json diagram-故障处理流程图.png
+4. 替换占位符，删除源代码块
 ```
 
 ## 渲染失败排查
@@ -332,12 +399,14 @@ graph TD
 2. **图表溢出**：减少节点数量或增加 width 参数
 3. **语法错误**：先用 `npx @mermaid-js/mermaid-cli -i file.mmd -o /dev/null` 验证语法
 4. **节点 ID 冲突**：不同 subgraph 中的节点 ID 不能重复
-5. **archify 布局校验失败**（最常见）：报错形如 `Label "XX" overlaps component "YY"` 或 `Component "ZZ" falls outside the viewBox`。**不要切回 Mermaid 路径**——这是 JSON 写法问题，切 Mermaid 只是逃避。正确做法：
-   - 若使用了手算 `pos`/`size`：改用 grid 模式（`layout.mode: "grid"` + 每个组件写 `row`/`col`），彻底消灭坐标类错误
-   - 若 grid 模式下 boundary 超出画布：增大 `cols` 或 `cellW`/`cellH`，或把 boundary 成员改到更靠中间的 `row`/`col`
-   - 若 connection label 压节点：删掉该 label（省略 `label` 字段），或把说明移到 `cards`
-   - 修正后重跑 `node scripts/render_archify.mjs`，直到命令输出 `OK: ...` 为止
-6. **archify schema 校验失败**：报错形如 `/components/2 must NOT have additional properties`。按提示修正 JSON 字段（通常是 `type` 用了 schema 之外的值，或混写了 `pos` 和 `row`/`col`），修正后重跑
+5. **archify 布局校验失败**（最常见）：报错形如 `Label "XX" overlaps component "YY"`、`Nodes "A" and "B" are less than 8px apart` 或 `falls outside the viewBox`。**不要切回 Mermaid 路径**——这是 JSON 写法问题，切 Mermaid 只是逃避。按 type 对症修：
+   - **architecture**：用 grid 模式（`row`/`col`），boundary 超画布就增大 `cols` 或 `cellW`，connection label 压节点就删 label
+   - **workflow**：同一 lane 连续节点不能用相邻窄列（col 1↔2、3↔4 只隔 70-80px），改用宽松列（1,3,5 或 0,2,4）；edge 太短就删 label 或换 `route: "drop"`
+   - **sequence**：participant 超 8 个要拆图；message 太密（报 `overlap horizontally`）加大 `meta.viewBox` 高度；箭头跨度 <60px 说明两个 participant 太近，减少角色
+   - **dataflow**：stage 只能 2–5 个，超出报错就合并阶段；flow 的 `label` 必填，缺失会报错
+   - **lifecycle**：必须有 `main` lane；状态重叠（报 `across lanes`）用不同 `col` 或 `yOffset` 分开
+   - 通用：修正后重跑 `node scripts/render_archify.mjs`，直到输出 `OK: ...`
+6. **archify schema 校验失败**：报错形如 `/nodes/2 must NOT have additional properties`。按提示修正 JSON 字段（通常是 `type` 用了 schema 之外的值，或混写了 `pos` 和 `row`/`col`，或字段拼错），修正后重跑
 7. **archify-server 未启动**：`render_archify.mjs` 会打印 `archify-server not running, using local Puppeteer`，退为本地模式。在沙盒内运行时本地 Puppeteer 同样不可用，此时应先在沙盒外执行 `bash scripts/start-archify-server.sh` 再重试
 
 ## 完成状态
@@ -350,7 +419,7 @@ graph TD
 生成图表数: {N}
   其中直接使用上游Mermaid代码: {N}
   其中由ASCII图转换: {N}
-  其中使用archify渲染（架构类）: {N}
+  其中使用archify渲染: {N}（按类型分：architecture {N} / workflow {N} / sequence {N} / dataflow {N} / lifecycle {N}）
 跳过占位符（非图表类）: {N}
 跳过占位符（缺少结构化依据，需补充正文）: {N}，清单：{占位符位置1, 占位符位置2, ...}
 图表清单: {diagram-XX.png, diagram-YY.png, ...}
