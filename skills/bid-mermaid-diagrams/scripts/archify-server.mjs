@@ -149,5 +149,16 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`[archify-server] listening on http://127.0.0.1:${PORT}`);
 });
 
+// 进程级兜底：单次渲染的异常（如 archify renderer 校验失败抛错）绝不能拖垮整个服务。
+// 每次渲染用独立 tmp 文件、无共享状态，异常后继续服务是安全的。
+// （曾观察到 render-architecture.mjs validateArchitecture / render-lifecycle.mjs
+// 抛错导致整个进程退出，使后续所有 archify 渲染失败。）
+process.on('uncaughtException', (err) => {
+  console.error('[archify-server] uncaughtException (survived):', err && err.message);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[archify-server] unhandledRejection (survived):', err && (err.message || err));
+});
+
 process.on('SIGTERM', () => { server.close(); process.exit(0); });
 process.on('SIGINT',  () => { server.close(); process.exit(0); });

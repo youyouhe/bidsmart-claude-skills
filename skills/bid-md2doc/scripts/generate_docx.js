@@ -214,6 +214,17 @@ function parseImage(line, baseDir) {
     const imageData = fs.readFileSync(fullPath);
     const ext = path.extname(fullPath).toLowerCase();
 
+    // 校验图片格式：只有已知格式才嵌入 docx。
+    // 非图片文件强行喂给 docx 的 ImageRun 会生成 .undefined 扩展名的 media 条目，
+    // 导致 DocScan 后期增强（OOXML 解析）报 500（Content_Types 不识别 .undefined）。
+    const validExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'];
+    if (!validExts.includes(ext)) {
+      console.warn(`generate_docx: 不支持的图片格式 ${ext || '(无扩展名)'}: ${imgPath}，以占位符替代`);
+      return new Paragraph({
+        children: [new TextRun({ text: `[图片格式不支持: ${imgPath}]`, color: 'FF0000' })],
+      });
+    }
+
     // 获取图片尺寸（简单处理，固定宽度）
     const maxWidth = 550; // 约15cm
 
