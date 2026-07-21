@@ -194,9 +194,99 @@ grep -cP '[┌┐└┘├┤┬┴┼═║╔╗╚╝]|[─━]{2,}|[─━].
 
 该正则同时覆盖 box 框图（`┌─┐`）和箭头线条图（`──→│` 流水线/时序）。`bid-tech-proposal`/`bid-commercial-proposal` 规定所有图表必须用「占位符 + Mermaid 代码块」，禁止任何 ASCII 字符图（见其 SKILL.md「图表处理」节）。任一文件命中数 > 0 → 记为 🔴 必改问题，注明文件名和命中行号，要求转换为 Mermaid 代码块后重新渲染。
 
+#### 5.5 交叉引用映射生成（供 S10 bid-md2doc 使用）
+
+S10（bid-md2doc）在生成 docx 后通过 DocScan 的 crossref API 为索引表填入真实页码。由于 S8 拥有完整上下文（分析报告 + 所有响应文件 + 生成的 00-目录.md），S8 是生成 keyword→row 映射的最佳时机。
+
+**目标**：生成 `响应文件/crossref_mapping.json`，记录目录表中每个附件对应的正文锚点关键字。
+
+**生成逻辑**：
+1. 读取 `00-目录.md`（如果步骤 6 尚未生成，则用内存中的目录表结构）
+2. 对目录表中每一行，提取"附件名称"列的内容
+3. 在对应的响应文件 markdown 中查找该附件名称的**首次 H2 标题出现**（generate_docx.js 在 H2 前自动分页，该标题一定在新页顶部，是 PAGEREF 的最佳锚点）
+4. 记录 keyword + 对应的 markdown 源文件名
+
+**输出格式**（`响应文件/crossref_mapping.json`）：
+
+```json
+{
+  "source": "bid-assembly auto-generated",
+  "generated_at": "YYYY-MM-DDTHH:MM:SS",
+  "crossrefs": [
+    {
+      "row_index": 0,
+      "section_label": "报价函",
+      "source_file": "01-报价函.md",
+      "keyword": "一、报价函",
+      "keyword_type": "section_title"
+    }
+  ],
+  "index_table_info": {
+    "has_page_column": false,
+    "page_column_index": null,
+    "column_count": 5
+  }
+}
+```
+
+**容错**：
+- 如果附件名称在对应文件中找不到匹配的标题 → 记录 `keyword: null` + `notes: "未找到匹配标题"`
+- 如果 `00-目录.md` 不存在或目录表结构异常 → 仍生成 JSON，但 `crossrefs: []`, `skipped: true`, `reason: "..."`
+
+#### 5.6 DocScan 预检（可选，需 DocScan 服务在线）
+
+**⚠️ DocScan 是一个可选的外部服务。** 此步骤在 DocScan 在线时自动执行，离线时优雅跳过。
+
+##### 5.6.1 检查 DocScan 可用性
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8800/api/health
+```
+
+- **返回 200** → 继续 5.6.2
+- **连接失败/超时** → 跳过整个 5.6 节，在完成状态中标注"DocScan 预检跳过"
+
+##### 5.6.2 生成预检 docx
+
+将所有 `响应文件/*.md`（按文件名排序，排除核对报告等内部文件）拼接为单一 .md，通过 DocScan 转换为 docx 做格式预检：
+
+```bash
+# 拼接所有响应文件（按序号排序，排除内部文件）
+cat 响应文件/[0-9]*.md > /tmp/assembly_preflight.md
+# 上传到 DocScan
+FID=$(curl -s -X POST http://localhost:8800/api/md2docx \
+  -F "file=@/tmp/assembly_preflight.md" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+```
+
+##### 5.6.3 格式预检
+
+```bash
+curl -s http://localhost:8800/api/docx/$FID/preview
+```
+
+- **表格完整性**：检查 preview 返回的 tables 中，每张表的列数/行数是否与 markdown 源表一致
+- **异常空段落**：连续 5 个以上空段落 → 可能表示 markdown 中有多余空行，标记 🟡
+- **标题层级**：检查段落中是否有跳级（如 Heading 1 直接跳到 Heading 3）
+
+##### 5.6.4 占位符精确审计（OOXML 级别）
+
+```bash
+curl -s http://localhost:8800/api/docx/$FID/placeholders
+```
+
+将 DocScan 返回的占位符清单与步骤 5.3（markdown grep）的结果对比：
+
+- **DocScan 发现但 grep 遗漏的**：通常是表格深层嵌套中的占位符，或因换行被正则截断的占位符。这是 DocScan 的价值所在——将此差异写入核对报告的"未替换占位符清单"
+- **grep 发现但 DocScan 未发现的**：极少数（如占位符在 markdown 代码块中，pandoc 未转换为真实文本）。标注为 🔵 提醒
+
+**DocScan 不可用时的处理**：
+- 步骤 5.6 整体跳过，不阻塞主流程
+- 完成状态中标注"DocScan 预检跳过"
+- crossref_mapping.json 仍需生成（不依赖 DocScan）
+
 ### 6. 输出
 
-生成以下3个文件到 `响应文件/` 目录：
+生成以下文件到 `响应文件/` 目录：
 
 #### 6.1 核对报告.md
 
@@ -409,7 +499,8 @@ ASSEMBLY_SUMMARY -->
 🔵提醒: {N}个
 附件覆盖率: {已有}/{应有}
 ★文件覆盖率: {已有}/{应有}
-输出文件: 核对报告.md, 00-目录.md, 装订指南.md
+输出文件: 核对报告.md, 00-目录.md, 装订指南.md, crossref_mapping.json
+DocScan预检: {已执行/SKIPPED_OFFLINE}
 状态: SUCCESS
 --- END ---
 ```
