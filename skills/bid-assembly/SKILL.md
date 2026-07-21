@@ -66,6 +66,17 @@ EOF
 - 读取每个文件的完整内容
 - 提取每个文件的标题（附件编号+名称）
 
+**⚠️ 上下文预算管理**：大型投标项目可能有 20+ 个 .md 文件，总计数万行。如果文件数量 > 15 个或预估总行数 > 5000 行，分批处理：
+
+1. **第一遍（全量扫描）**：只读每个文件的标题（前 30 行）和章节结构（grep `^## `），建立文件→章节索引
+2. **第二遍（按需精读）**：根据检查维度定向读取——完整性检查读标题即可，一致性检查（金额/公司名/人员）精读关键文件，占位符检查全文 grep 而非全量 Read
+3. **第三遍（深度检查）**：仅对标记了 🔴🟡 问题的文件做全文通读，补全问题细节
+
+**优先精读的文件**（始终全量读取）：
+- 报价函（`01-报价函.md` 或类似编号）——金额、公司名、项目名的核心来源
+- 封面文件（`00-封面.md` 或类似编号，如存在）——公司名、项目名的权威来源
+- 分析报告中标记 ★ 的必须附件对应的文件
+
 ### 2. 完整性检查（对照分析报告）
 
 逐项检查以下内容是否完整：
@@ -81,12 +92,20 @@ EOF
 - 分析报告中每个**写作型评分因素**，是否有对应的技术文档
 - 分析报告中每个**客观计分评分因素**，是否有对应的商务文档/证明材料
 
+**映射方法**（避免 LLM 语义猜测导致误报/漏报）：
+1. 从分析报告读取评分因素列表，提取每个因素的**关键短语**（如"项目实施方案"、"售后服务方案"、"人员资质"）
+2. 在响应文件的**章节标题**（`##` 和 `###` 级别）中搜索这些关键短语
+3. 匹配规则：关键短语完全包含在标题中（如关键短语"实施方案"匹配标题"## 三、项目实施方案"）→ 视为已覆盖；部分匹配且语义高度相关 → 标记为"疑似覆盖"，人工确认
+4. 记录覆盖映射表（评分因素 → 文件:章节标题），写入核对报告"覆盖率统计"节
+
 #### 2.3 评分子维度覆盖
 
 对每个写作型评分因素：
 - 从分析报告读取该因素的评分子维度列表
 - 在对应文件中搜索是否每个子维度都有独立章节
 - 统计覆盖率：已覆盖子维度数 / 总子维度数
+
+**与 2.2 的区别**：2.2 检查"评分因素→文件"的粗粒度映射，2.3 深入到"子维度→章节"的细粒度检查。如果 2.2 已经无法确定映射，先暂停并标注，不要跳到 2.3 做无效的细粒度检查。
 
 #### 2.4 附件编号连续性
 
@@ -107,9 +126,17 @@ EOF
 
 #### 3.1 公司名称
 
-- 提取所有文件中出现的公司名称
-- 检查是否完全一致（全称 vs 简称、有无空格差异）
-- 标注不一致的位置（文件名:行号）
+**提取范围**（仅从权威位置提取，避免将采购人名称、引用案例公司名误判为投标人名称）：
+1. **报价函**的签章区域（"投标人名称："或"单位名称："后的名称）
+2. **封面**文件中的投标人/供应商名称
+3. **授权委托书**中的授权单位名称
+4. **资格声明/承诺函**的落款单位
+
+从以上位置提取的公司名称作为**基准名称**，然后扫描所有其他文件，检查出现的公司名称是否与基准一致。
+- 检查是否完全一致（全称 vs 简称、有无空格差异、括号全角/半角）
+- 标注不一致的位置（文件名:行号）和具体差异
+
+**说明**：投标文件中会出现多个不同的公司名称（采购人、引用案例客户、联合体成员等），仅比对以上权威来源的投标人名称。其他公司名称（如业绩案例中的客户）是正常的，不作为问题报告。
 
 #### 3.2 报价金额
 
@@ -118,6 +145,33 @@ EOF
 - 全生命周期成本分析中的合同期费用（如存在）
 - 三者必须完全一致
 - 检查大写金额与小写金额是否互相匹配
+
+**大写金额验证**（LLM 不擅长中文大写金额转换，使用确定性脚本验证）：
+
+```bash
+python3 -c "
+import re, sys
+# 读取报价函中的大写金额
+with open('响应文件/01-报价函.md') as f:
+    content = f.read()
+# 匹配小写：总价（元）：1,234,567.89 或 1234567.89
+lower = re.findall(r'(?:总价|总金额|报价)[^：:]*[：:]\s*[\d,]+\.?\d*', content)
+# 匹配大写：壹佰贰拾叁万肆仟伍佰陆拾柒元捌角玖分
+upper = re.findall(r'[壹贰叁肆伍陆柒捌玖零拾佰仟万亿元整角分]+', content)
+
+# 简单校验：大写金额不应为空，不应出现过短（<4字）的疑似金额
+for u in upper:
+    if len(u) >= 4:
+        print(f'大写: {u}')
+    else:
+        print(f'WARN: 疑似无效大写金额: {u}')
+for lo in lower:
+    print(f'小写: {lo}')
+print('NOTE: 确定性转换校验需完整数字→大写映射算法，此脚本做格式级检查；语义级比对仍由 LLM 完成')
+"
+```
+
+**注意**：以上脚本做格式级快速检查（大写是否存在、是否过短）；完整的大写↔小写双向转换需要 `rmb` 等专业 Python 库或预置映射表。如果脚本检测到大写金额格式异常（如出现"二元"而非"贰元"等常见错误），标记为 🔴 必改。
 
 #### 3.3 项目信息
 
@@ -194,81 +248,53 @@ grep -cP '[┌┐└┘├┤┬┴┼═║╔╗╚╝]|[─━]{2,}|[─━].
 
 该正则同时覆盖 box 框图（`┌─┐`）和箭头线条图（`──→│` 流水线/时序）。`bid-tech-proposal`/`bid-commercial-proposal` 规定所有图表必须用「占位符 + Mermaid 代码块」，禁止任何 ASCII 字符图（见其 SKILL.md「图表处理」节）。任一文件命中数 > 0 → 记为 🔴 必改问题，注明文件名和命中行号，要求转换为 Mermaid 代码块后重新渲染。
 
-#### 5.5 交叉引用映射生成（供 S10 bid-md2doc 使用）
-
-S10（bid-md2doc）在生成 docx 后通过 DocScan 的 crossref API 为索引表填入真实页码。由于 S8 拥有完整上下文（分析报告 + 所有响应文件 + 生成的 00-目录.md），S8 是生成 keyword→row 映射的最佳时机。
-
-**目标**：生成 `响应文件/crossref_mapping.json`，记录目录表中每个附件对应的正文锚点关键字。
-
-**生成逻辑**：
-1. 读取 `00-目录.md`（如果步骤 6 尚未生成，则用内存中的目录表结构）
-2. 对目录表中每一行，提取"附件名称"列的内容
-3. 在对应的响应文件 markdown 中查找该附件名称的**首次 H2 标题出现**（generate_docx.js 在 H2 前自动分页，该标题一定在新页顶部，是 PAGEREF 的最佳锚点）
-4. 记录 keyword + 对应的 markdown 源文件名
-
-**输出格式**（`响应文件/crossref_mapping.json`）：
-
-```json
-{
-  "source": "bid-assembly auto-generated",
-  "generated_at": "YYYY-MM-DDTHH:MM:SS",
-  "crossrefs": [
-    {
-      "row_index": 0,
-      "section_label": "报价函",
-      "source_file": "01-报价函.md",
-      "keyword": "一、报价函",
-      "keyword_type": "section_title"
-    }
-  ],
-  "index_table_info": {
-    "has_page_column": false,
-    "page_column_index": null,
-    "column_count": 5
-  }
-}
-```
-
-**容错**：
-- 如果附件名称在对应文件中找不到匹配的标题 → 记录 `keyword: null` + `notes: "未找到匹配标题"`
-- 如果 `00-目录.md` 不存在或目录表结构异常 → 仍生成 JSON，但 `crossrefs: []`, `skipped: true`, `reason: "..."`
-
-#### 5.6 DocScan 预检（可选，需 DocScan 服务在线）
+#### 5.5 DocScan 预检（可选，需 DocScan 服务在线）
 
 **⚠️ DocScan 是一个可选的外部服务。** 此步骤在 DocScan 在线时自动执行，离线时优雅跳过。
 
-##### 5.6.1 检查 DocScan 可用性
+##### 5.5.1 检查 DocScan 可用性
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}" http://localhost:8800/api/health
 ```
 
-- **返回 200** → 继续 5.6.2
-- **连接失败/超时** → 跳过整个 5.6 节，在完成状态中标注"DocScan 预检跳过"
+- **返回 200** → 继续 5.5.2
+- **连接失败/超时** → 跳过整个 5.5 节，在完成状态中标注"DocScan 预检跳过"
 
-##### 5.6.2 生成预检 docx
+##### 5.5.2 生成预检 docx
 
-将所有 `响应文件/*.md`（按文件名排序，排除核对报告等内部文件）拼接为单一 .md，通过 DocScan 转换为 docx 做格式预检：
+将所有 `响应文件/*.md`（按文件名排序，**必须排除内部文件**：核对报告、装订指南、00-目录、crossref_mapping、扫描件报告等 S8/S10 自身产出）拼接为单一 .md，通过 DocScan 转换为 docx 做格式预检：
 
 ```bash
-# 拼接所有响应文件（按序号排序，排除内部文件）
-cat 响应文件/[0-9]*.md > /tmp/assembly_preflight.md
+# 拼接所有响应文件（按序号排序，排除内部文件和 S8 自身产出）
+cat $(ls 响应文件/[0-9]*.md | grep -v '00-目录\|核对报告\|装订指南\|crossref_mapping\|扫描件\|Word文档待完善\|信息填写进度\|资料检索') > /tmp/assembly_preflight.md
 # 上传到 DocScan
 FID=$(curl -s -X POST http://localhost:8800/api/md2docx \
   -F "file=@/tmp/assembly_preflight.md" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
 ```
 
-##### 5.6.3 格式预检
+##### 5.5.3 格式预检
 
 ```bash
 curl -s http://localhost:8800/api/docx/$FID/preview
 ```
 
+DocScan 预检发现的问题按以下标准分级写入核对报告：
+
+| 发现类型 | 级别 | 说明 |
+|---------|------|------|
+| 表格列数/行数与 markdown 源表不一致（差异 > 2 行/列） | 🟡 | 可能为 pandoc 转换异常 |
+| 连续 5 个以上空段落 | 🔵 | 可能表示 markdown 有多余空行，通常影响不大 |
+| 标题层级跳级（如 H1→H3 无 H2） | 🟡 | 影响 Word 目录生成和导航窗格 |
+| 表格完全为空（0 行 0 列） | 🔴 | markdown 源表格可能格式错误导致 pandoc 无法解析 |
+| 疑似 Markdown 格式残留（docx 中出现 `**`、`#` 等原始标记） | 🔴 | pandoc 转换不完整，源文件需修复 |
+
+**具体检查项**：
 - **表格完整性**：检查 preview 返回的 tables 中，每张表的列数/行数是否与 markdown 源表一致
-- **异常空段落**：连续 5 个以上空段落 → 可能表示 markdown 中有多余空行，标记 🟡
+- **异常空段落**：连续 5 个以上空段落
 - **标题层级**：检查段落中是否有跳级（如 Heading 1 直接跳到 Heading 3）
 
-##### 5.6.4 占位符精确审计（OOXML 级别）
+##### 5.5.4 占位符精确审计（OOXML 级别）
 
 ```bash
 curl -s http://localhost:8800/api/docx/$FID/placeholders
@@ -280,7 +306,7 @@ curl -s http://localhost:8800/api/docx/$FID/placeholders
 - **grep 发现但 DocScan 未发现的**：极少数（如占位符在 markdown 代码块中，pandoc 未转换为真实文本）。标注为 🔵 提醒
 
 **DocScan 不可用时的处理**：
-- 步骤 5.6 整体跳过，不阻塞主流程
+- 步骤 5.5 整体跳过，不阻塞主流程
 - 完成状态中标注"DocScan 预检跳过"
 - crossref_mapping.json 仍需生成（不依赖 DocScan）
 
@@ -348,6 +374,42 @@ curl -s http://localhost:8800/api/docx/$FID/placeholders
 - ✅ 已完成：文件存在且通过检查
 - ❌ 缺失：文件不存在
 - ⚠️ 有问题：文件存在但有🔴或🟡问题
+
+#### 6.2.5 交叉引用映射生成（生成 `crossref_mapping.json`）
+
+`00-目录.md` 已生成，此时目录表结构已确定。基于此生成供 S10（bid-md2doc）DocScan 交叉引用使用的 keyword → 表格行映射。
+
+**生成逻辑**：
+1. 解析刚才生成的 `00-目录.md` 中的表格，提取每行的"附件名称"列
+2. 在对应的响应文件 markdown 中查找该附件名称的**首次 H2 标题出现**（generate_docx.js 在 H2 前自动分页，该标题一定在新页顶部，是 PAGEREF 的最佳锚点）
+3. 记录 keyword + 对应的 markdown 源文件名
+
+**输出格式**（`响应文件/crossref_mapping.json`）：
+
+```json
+{
+  "source": "bid-assembly auto-generated",
+  "generated_at": "YYYY-MM-DDTHH:MM:SS",
+  "crossrefs": [
+    {
+      "row_index": 0,
+      "section_label": "报价函",
+      "source_file": "01-报价函.md",
+      "keyword": "一、报价函",
+      "keyword_type": "section_title"
+    }
+  ],
+  "index_table_info": {
+    "has_page_column": false,
+    "page_column_index": null,
+    "column_count": 5
+  }
+}
+```
+
+**容错**：
+- 如果附件名称在对应文件中找不到匹配的标题 → 记录 `keyword: null` + `notes: "未找到匹配标题"`
+- 如果 `00-目录.md` 解析失败或目录表结构异常 → 仍生成 JSON，但 `crossrefs: []`, `skipped: true`, `reason: "..."`
 
 #### 6.3 装订指南.md
 
@@ -480,13 +542,44 @@ ASSEMBLY_SUMMARY -->
   - `file`：涉及的文件（缺失文件时为 null）
   - `target_skill`：应由哪个 skill 修复（`bid-tech-proposal` / `bid-commercial-proposal` / `bid-analysis`）
 
-### ⚠️ 强制一致性校验（生成 JSON 前必须执行）
+### ⚠️ 生成顺序与一致性校验（防止正文与 JSON 不一致）
 
-1. **逐条回溯**：生成 JSON 前，回到正文"详细问题清单"，逐条数清🔴和🟡的条目
-2. **一一对应**：正文中每一条🔴问题必须在 `red_issues[]` 中有对应条目，每一条🟡问题必须在 `yellow_issues[]` 中有对应条目，不得遗漏
-3. **计数自洽**：`red_count` 必须等于 `red_issues.length`，`yellow_count` 必须等于 `yellow_issues.length`
-4. **禁止幻觉**：JSON 中不得出现正文未提及的问题
-5. **target_skill 必填**：每个 issue 都必须指定 `target_skill`，不得留空
+**推荐生成顺序**（先 JSON 后正文，减少双重维护）：
+
+1. **先在内存中构建完整的 JSON 结构**（`red_issues[]`、`yellow_issues[]`）
+2. **再基于 JSON 渲染正文**"详细问题清单"——每个 issue 对应一条正文描述
+3. 正文中任何 🔴🟡 问题都源于 JSON，正文中不应出现 JSON 里没有的条目
+
+**强制一致性校验**（JSON 写入文件后必须立即执行）：
+
+```bash
+# 验证 JSON 有效且计数自洽
+python3 -c "
+import json, re
+with open('响应文件/核对报告.md') as f:
+    content = f.read()
+m = re.search(r'<!-- ASSEMBLY_SUMMARY\n(.*?)\nASSEMBLY_SUMMARY -->', content, re.DOTALL)
+if not m:
+    print('ERROR: JSON 摘要块未找到')
+    exit(1)
+data = json.loads(m.group(1))
+# 计数自洽
+assert data['red_count'] == len(data['red_issues']), f'red_count {data[\"red_count\"]} != len {len(data[\"red_issues\"])}'
+assert data['yellow_count'] == len(data['yellow_issues']), f'yellow_count mismatch'
+# target_skill 必填
+for issue in data['red_issues'] + data['yellow_issues']:
+    assert issue.get('target_skill'), f'Issue {issue[\"id\"]} missing target_skill'
+# 与正文🔴🟡计数交叉验证
+body_red = len(re.findall(r'^### 🔴|^\d+\.\s+\[🔴\]', content, re.M))
+body_yellow = len(re.findall(r'^### 🟡|^\d+\.\s+\[🟡\]', content, re.M))
+print(f'JSON: {data[\"red_count\"]}R/{data[\"yellow_count\"]}Y  Body: {body_red}R/{body_yellow}Y')
+assert body_red >= data['red_count'], f'Body has fewer red items than JSON'
+assert body_yellow >= data['yellow_count'], f'Body has fewer yellow items than JSON'
+print('PASS')
+"
+```
+
+校验失败 → 回修改正文或 JSON，重新验证通过后才能输出"完成状态"。
 
 ## 完成状态
 
