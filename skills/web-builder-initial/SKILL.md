@@ -496,12 +496,59 @@ Status: SUCCESS
 
 ## Gotchas & Best Practices
 
-See `gotchas.md` for:
-- Common marker format mistakes
-- File order enforcement
-- Web component shadow DOM caveats
-- Tailwind CDN vs build approach
-- Icon library integration pitfalls
+> 下面两条 ⚠️ 是**会导致整页黑屏 / 白屏、必须严格遵守**的硬规则，源自真实 POC 事故。完整踩坑清单另见 `gotchas.md`（若存在）。
+
+### ⚠️ 陷阱 1：Three.js / WebGL / Canvas2D 对象【禁止】放入响应式 state
+
+**症状**：3D / 可视化页面渲染区全黑，浏览器控制台报：
+`Uncaught TypeError: 'get' on proxy: property 'modelViewMatrix' is a read-only and non-configurable data property ...`
+（即便机器有独立显卡、WebGL 正常，也黑屏。）
+
+**根因**：Alpine.js（以及 Vue 的 `reactive()`/`data()`、Pinia、MobX 等所有基于 Proxy 的响应式系统）会**递归代理**写入响应式 state 的对象。而 Three.js 内部用 `Object.defineProperty` 定义了 `modelViewMatrix` / `matrixWorld` 等**不可配置只读**属性；这些对象一旦被 Proxy 包装，渲染循环每帧读取矩阵时就会抛错，一帧都画不出来 → 透明 canvas 盖在深色背景上 = 黑屏。
+
+**正确做法**：所有 Three.js / WebGL / Canvas2D 运行期对象（`scene` / `camera` / `renderer` / `controls` / `clock` / 各种 `Mesh` / `Material` / `Geometry` / `Texture`）必须存放在**模块级变量或非响应式引用**里：
+- Alpine：文件顶层的 `const T = {};` 普通对象（**不要**挂在组件 `this` 上）
+- React：`useRef()`（**不要** `useState()`）
+- Vue：`shallowRef()` 或模块级变量（**不要** `ref()` / `reactive()`）
+
+响应式 state 只放**纯 UI 数据**：开关、文本、当前选中项、loading 标志、FPS 数值等。
+
+```javascript
+// ❌ 错误（会被 Alpine 代理 → 渲染每帧抛错 → 黑屏）
+function appState() {
+  return {
+    scene: null,
+    init() { this.scene = new THREE.Scene(); /* ... */ }
+  };
+}
+
+// ✅ 正确（模块级非响应式容器，UI 状态才放 this）
+const T = {};
+function appState() {
+  return {
+    loading: true, fps: 0,
+    init() { T.scene = new THREE.Scene(); /* ... */ },
+    animate() { T.renderer.render(T.scene, T.camera); }
+  };
+}
+```
+
+### ⚠️ 陷阱 2：Alpine 初始化【不要】同时用 `init()` 方法 + `x-init="init()"`
+
+**症状**：页面黑屏，或 DOM 里出现**重复元素**（例如本该只有 1 个 `<canvas>` 却出现 2 个）；活动元素被第一个（空的）覆盖。
+
+**根因**：Alpine.js 会**自动调用组件数据对象里名为 `init()` 的方法一次**。若同时在根元素上又写了 `x-init="init()"`，`init()` 就会被调用**两次** → 重复创建 canvas / 绑定事件 / 启动动画循环，后创建的活动 canvas 被先创建的空 canvas 挤出可视区 → 黑屏。
+
+**正确做法**：二选一，不要叠加：
+- ✅ 推荐：只定义 `init()` 方法，**不写** `x-init`（依赖 Alpine 自动调用）；
+- 或：只用 `x-init="..."`，但把方法名改成别的（如 `boot()`）避免触发自动调用；
+- 防御：初始化函数顶部加重入守卫：`if (T.renderer) return;`（已初始化就直接返回）。
+
+### 其它常见问题
+- 标记格式：marker 必须成对，文件顺序 index.html 必须在前
+- Web Component：注意 shadow DOM 隔离
+- Tailwind：CDN 仅用于原型，生产环境应构建
+- Feather 图标：动态注入图标 DOM 后需再次调用 `feather.replace()`
 
 ---
 

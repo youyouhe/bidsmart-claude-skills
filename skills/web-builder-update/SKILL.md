@@ -1307,6 +1307,23 @@ When adding new pages, ensure navigation doesn't create dead links:
 # Solution: Create post.html stub OR remove link until post.html exists
 ```
 
+### Edge Case 4: ⚠️ 3D / 可视化页面黑屏 — Three.js 对象误入响应式 state
+
+**当用户报告"3D / 可视化页面渲染区全黑"时，优先排查此项。** 典型控制台报错：
+`Uncaught TypeError: 'get' on proxy: property 'modelViewMatrix' is a read-only and non-configurable data property ...`
+
+**根因**：Three.js / WebGL / Canvas2D 对象被放进了基于 Proxy 的响应式 state（Alpine 的 `this`、Vue 的 `reactive()`/`data()`、React 的 `useState()`）。Three.js 内部用 `Object.defineProperty` 定义的矩阵属性被 Proxy 拦截 → 渲染循环每帧抛错 → 一帧都画不出来 → 透明 canvas 盖在深色背景上 = 黑屏。即便机器有独立显卡、WebGL 正常也复现。
+
+**修复模式（SEARCH/REPLACE）**：把所有 Three.js 运行期对象（`scene`/`camera`/`renderer`/`controls`/`mesh`/`material`/`geometry`）从响应式 state 移到**模块级非响应式容器**——Alpine 用文件顶层 `const T = {};`，React 用 `useRef()`，Vue 用 `shallowRef()`；响应式 state 只保留纯 UI 数据（开关/文本/loading/FPS）。把 `this.scene` → `T.scene`、`self.scene` → `T.scene` 等全部替换，渲染调用改为 `T.renderer.render(T.scene, T.camera)`。详见 `web-builder-initial` 陷阱 1。
+
+### Edge Case 5: ⚠️ 页面黑屏 / 出现重复 canvas — Alpine 双重初始化
+
+**症状**：DOM 里本该只有 1 个 `<canvas>` 却出现 2 个，或初始化逻辑被执行了两次、定时器/动画循环重复。
+
+**根因**：Alpine.js 会**自动调用组件里名为 `init()` 的方法一次**；若根元素上又写了 `x-init="init()"`，`init()` 就执行两次 → 重复创建 canvas/DOM，后创建的活动 canvas 被先创建的空 canvas 挤出可视区 → 黑屏。
+
+**修复模式**：二选一——删除根元素上的 `x-init="init()"`（只依赖 Alpine 自动调用），或把方法改名；并在初始化函数顶部加重入守卫（如 `if (T.renderer) return;`）。详见 `web-builder-initial` 陷阱 2。
+
 ---
 
 **Implementation Status**: ✅ Complete - Ready for use
