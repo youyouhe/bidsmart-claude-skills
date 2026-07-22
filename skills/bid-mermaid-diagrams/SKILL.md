@@ -25,10 +25,11 @@ description: >
 
 ## 核心工具
 
-- **mermaid_render**：系统内置工具，直接传入 Mermaid 代码和输出路径即可渲染，优先使用（流程图/组织架构图/甘特图/ER图走这条路径）
-- 渲染脚本：`scripts/render.sh`（甘特图/ER 图专用，Mermaid+mmdc 路径）
+- **mermaid_render**：系统内置工具，直接传入 Mermaid 代码和输出路径即可渲染，优先使用（甘特图/ER图走这条路径）
+- 渲染脚本：`scripts/render.sh`（甘特图/ER 图专用，Mermaid+mmdc 路径，`mermaid_render` 工具内部即调用此逻辑）
 - 主题配置：`scripts/mermaid.json`（蓝色专业主题，支持中文）
-- **archify 渲染脚本**：`scripts/render_archify.mjs`（架构图/流程图/时序图/数据流图/状态机走这条路径，优先通过 HTTP 调用沙盒外的 archify-server，服务不在线才尝试本地 Puppeteer）
+- **archify_render**：系统内置工具，直接传入 diagram type + JSON IR 对象 + 输出路径即可渲染（架构图/流程图/时序图/数据流图/状态机走这条路径），无需先手动写 JSON 文件再拼命令行；工具内部优先通过 HTTP 调用沙盒外的 archify-server，服务不在线才退化本地 Puppeteer，渲染成功后按 `noWatermark` 参数决定是否自动加水印
+- 底层渲染脚本：`scripts/render_archify.mjs`（`archify_render` 工具内部调用此脚本；仅当工具不可用时才需手动 `node` 调用作为 fallback，见「Archify Server 启动方式」外的应急路径）
 
 ## Archify Server 启动方式
 
@@ -45,7 +46,7 @@ bash skills/bid-mermaid-diagrams/scripts/stop-archify-server.sh
 curl http://127.0.0.1:18800/health
 ```
 
-服务在线时，`render_archify.mjs` 内部会自动通过 HTTP POST 发给服务端渲染，Chrome/Puppeteer 完全跑在沙盒外；服务不在线时退为本地 Puppeteer（仅在沙盒外环境有效）。
+服务在线时，`archify_render` 工具（及其底层 `render_archify.mjs`）会自动通过 HTTP POST 发给服务端渲染，Chrome/Puppeteer 完全跑在沙盒外；服务不在线时退为本地 Puppeteer（仅在沙盒外环境有效）。
 
 ## 工作流程
 
@@ -74,12 +75,10 @@ grep -rl "【此处插入.*图】" 响应文件/*.md 2>/dev/null
 2️⃣ 不添加水印
 ```
 
-- 用户选择**添加**（或默认）→ 正常渲染，脚本自动打水印
-- 用户选择**不添加** → 后续所有渲染命令前缀环境变量 `NO_WATERMARK=1`，例如：
-  ```bash
-  NO_WATERMARK=1 node scripts/render_archify.mjs architecture input.json output.png
-  NO_WATERMARK=1 bash scripts/render.sh input.mmd output.png
-  ```
+- 用户选择**添加**（或默认）→ 正常渲染，工具/脚本自动打水印
+- 用户选择**不添加** → 后续所有渲染调用带上跳过水印参数：
+  - `archify_render` 工具：传 `noWatermark=true`
+  - `scripts/render.sh`（甘特图/ER 图路径）：命令前缀环境变量 `NO_WATERMARK=1`，例如 `NO_WATERMARK=1 bash scripts/render.sh input.mmd output.png`
 - **AUTO_MODE=true**（bid-manager 调度，无法交互）→ 默认**添加水印**（保持防滥用），并在完成状态摘要中注明
 
 ### 1. 扫描占位符
@@ -249,14 +248,14 @@ grep -rl "【此处插入.*图】" 响应文件/*.md 2>/dev/null
 #### 共通规则（所有 archify 类型）
 - `id` 必须英文，`label`/`title` 用中文
 - **忠实原则**：节点/连接/状态来自原始 Mermaid 代码块/ASCII 图/文字描述，不得凭空编造；`row`/`col`/`stage`/`y` 等排布由你定，但不能增删元素
-- 渲染命令统一（第1参数是步骤3表中的 type）：
-  ```bash
-  node scripts/render_archify.mjs <type> input.{type}.json output.png
-  # 可选第4参数指定截图缩放（默认 3）
-  node scripts/render_archify.mjs <type> input.{type}.json output.png 4
+- 用 **archify_render** 工具渲染（第1参数 type 见步骤3表），JSON IR 直接作为 `inputJson` 参数传对象，不需要先写文件：
   ```
-  脚本会：archify render → check 校验 → 沙盒外 Chrome 截图 → 自动水印
-- **校验失败不许跳过、不许切回 Mermaid**：报错会给具体建议（如 `Suggested fix: labelDy +58` 或 `skip a column`），按提示修 JSON 重跑
+  archify_render(type="architecture", inputJson={...}, outputPath="/绝对路径/output.png")
+  # scale 参数可选指定截图缩放（默认 3）；noWatermark=true 跳过水印
+  archify_render(type="architecture", inputJson={...}, outputPath="/绝对路径/output.png", scale=4)
+  ```
+  工具内部：archify render → check 校验 → 沙盒外 Chrome 截图 → 自动水印
+- **校验失败不许跳过、不许切回 Mermaid**：报错会给具体建议（如 `Suggested fix: labelDy +58` 或 `skip a column`），按提示修 `inputJson` 字段重跑
 
 #### 从已有 Mermaid 代码块转译
 占位符后若已有上游写的 Mermaid 代码块（步骤2 方式A），**不要直接用它渲染**，而是读懂其结构后转译成对应 archify type 的 JSON IR：
@@ -371,7 +370,7 @@ graph TD
 
 3. **对每个待处理占位符，按优先级检查中间产物可复用**：
    - 已有对应 `diagram-{描述}.png` 但占位符未替换（渲染成功、替换中断）→ 直接执行步骤 5 替换，不重新渲染
-   - 已有对应 `diagram-{描述}.{type}.json` 但无 PNG（JSON 编写过、渲染失败/中断）→ 复用该 JSON 直接 `node scripts/render_archify.mjs` 重渲，不重新编写；若仍报布局校验错，按"渲染失败排查"修正 JSON 再渲
+   - 已有对应 `diagram-{描述}.{type}.json` 但无 PNG（JSON 编写过、渲染失败/中断）→ 复用该 JSON（`read` 读入后作为 `inputJson` 参数）直接调 `archify_render` 重渲，不重新编写；若仍报布局校验错，按"渲染失败排查"修正 JSON 再渲
    - 无任何中间产物 → 走完整流程（步骤 2 提取 → 3a 编写 JSON → 渲染 → 5 替换）
 
 4. **汇报区分**：本次跳过 {N} 张（已完成）、复用重渲 {M} 张、新建 {K} 张、仍失败 {L} 张（列出占位符和失败原因）。
@@ -417,15 +416,15 @@ graph TD
 用户：把系统总体架构图画出来
 操作：
 1. 识别为架构类 → archify architecture（步骤3a）
-2. 编写 XX.architecture.json（grid 布局，忠实于占位符前后的结构依据）
-3. node scripts/render_archify.mjs architecture XX.architecture.json diagram-系统总体架构图.png
+2. 编写 architecture JSON IR（grid 布局，忠实于占位符前后的结构依据）
+3. archify_render(type="architecture", inputJson={...}, outputPath="diagram-系统总体架构图.png")
 4. 替换占位符，删除源代码块
 
 用户：把故障处理流程图画出来
 操作：
 1. 识别为流程图 → archify workflow（步骤3a）
-2. 编写 XX.workflow.json（lane 泳道 + col，同一泳道连续节点跳列）
-3. node scripts/render_archify.mjs workflow XX.workflow.json diagram-故障处理流程图.png
+2. 编写 workflow JSON IR（lane 泳道 + col，同一泳道连续节点跳列）
+3. archify_render(type="workflow", inputJson={...}, outputPath="diagram-故障处理流程图.png")
 4. 替换占位符，删除源代码块
 ```
 
@@ -441,9 +440,9 @@ graph TD
    - **sequence**：participant 超 8 个要拆图；message 太密（报 `overlap horizontally`）加大 `meta.viewBox` 高度；箭头跨度 <60px 说明两个 participant 太近，减少角色
    - **dataflow**：stage 只能 2–5 个，超出报错就合并阶段；flow 的 `label` 必填，缺失会报错
    - **lifecycle**：必须有 `main` lane；状态重叠（报 `across lanes`）用不同 `col` 或 `yOffset` 分开
-   - 通用：修正后重跑 `node scripts/render_archify.mjs`，直到输出 `OK: ...`
+   - 通用：修正后重跑 `archify_render`，直到返回渲染成功
 6. **archify schema 校验失败**：报错形如 `/nodes/2 must NOT have additional properties`。按提示修正 JSON 字段（通常是 `type` 用了 schema 之外的值，或混写了 `pos` 和 `row`/`col`，或字段拼错），修正后重跑
-7. **archify-server 未启动**：`render_archify.mjs` 会打印 `archify-server not running, using local Puppeteer`，退为本地模式。在沙盒内运行时本地 Puppeteer 同样不可用，此时应先在沙盒外执行 `bash scripts/start-archify-server.sh` 再重试
+7. **archify-server 未启动**：`archify_render` 工具会在输出中提示 archify-server not running, using local Puppeteer，退为本地模式。在沙盒内运行时本地 Puppeteer 同样不可用，此时应先在沙盒外执行 `bash scripts/start-archify-server.sh` 再重试
 
 ## 完成状态
 

@@ -3,7 +3,7 @@ name: bid-md2doc
 description: >
   将 响应文件/ 目录下的 Markdown 文件转换为格式化的 Word (.docx) 文档。
   自动从分析报告和商务文件中读取项目名称、公司名称等信息，
-  通过命令行参数调用 generate_docx.js 脚本生成 Word 文件。
+  通过 generate_docx 工具（结构化参数）生成 Word 文件。
   当用户要求生成Word文档、转换MD为docx、导出响应文件时触发。
   前置条件：响应文件/ 目录下已有编写完成的 .md 文件。
 ---
@@ -92,55 +92,53 @@ ls 响应文件/*.md 2>/dev/null
 
 ### 2. 运行生成脚本
 
-**⚠️ 重要：不要复制脚本到工作目录！直接通过命令行参数调用原始脚本。**
-
-**脚本路径**（按优先级尝试）：
+**优先使用 `generate_docx` 工具**（系统内置，结构化参数直传，无需拼接/转义 JSON 字符串，也无需先确认脚本路径/npm 依赖——工具内部已固定处理）：
 
 ```
-# 主路径（smartbid-platform monorepo）
-/mnt/oldroot/home/bird/xyy/smartbid-platform/packages/bidsmart-skills/skills/bid-md2doc/scripts/generate_docx.js
-
-# 备选路径（独立 checkout 的 skills 仓库）
-/path/to/bidsmart-claude-skills/skills/bid-md2doc/scripts/generate_docx.js
-```
-
-先用 `test -f` 检查主路径是否存在，不存在则让用户提供备选路径。AUTO_MODE 下主路径不存在 → 标注 `FAILED`。
-
-通过 JSON 参数传入配置：
-
-```bash
-node {脚本路径} '{
-  "inputDir": "{工作目录}/响应文件",
-  "outputFile": "响应文件-{公司简称}-{项目简称}.docx",
-  "headerText": "{项目全称} 响应文件",
-  "footerCompany": "{公司全称}"
-}'
-```
-
-**⚠️ npm 依赖检查**：运行前确认 `docx` npm 包已安装：
-
-```bash
-test -d "$(dirname {脚本路径})/node_modules/docx" || echo "ERROR: docx npm 包未安装"
+generate_docx(
+  inputDir="{工作目录}/响应文件",
+  outputFile="响应文件-{公司简称}-{项目简称}.docx",
+  headerText="{项目全称} 响应文件",
+  footerCompany="{公司全称}"
+)
 ```
 
 #### 2.1 单册模式
 
 一次调用。**必须指定 `excludeFiles`** 排除 S8 和 S10 自身产出的内部文件：
 
-```bash
-node {脚本路径} '{"inputDir":"{workDir}/响应文件","outputFile":"{workDir}/响应文件-{公司简称}-{项目简称}.docx","headerText":"{项目全称} 响应文件","footerCompany":"{公司全称}","excludeFiles":["核对报告.md","装订指南.md","00-目录.md","crossref_mapping.json","扫描件资料清单.md","扫描件替换完成报告.md","信息填写进度报告.md","Word文档待完善清单.md"]}'
+```
+generate_docx(
+  inputDir="{workDir}/响应文件",
+  outputFile="{workDir}/响应文件-{公司简称}-{项目简称}.docx",
+  headerText="{项目全称} 响应文件",
+  footerCompany="{公司全称}",
+  excludeFiles=["核对报告.md","装订指南.md","00-目录.md","crossref_mapping.json","扫描件资料清单.md","扫描件替换完成报告.md","信息填写进度报告.md","Word文档待完善清单.md"]
+)
 ```
 
 #### 2.2 多册模式
 
-多次调用，每次传不同参数。每册都需排除内部文件：
+多次调用，每次传不同参数。**`generate_docx` 工具只支持 `excludeFiles`（排除法），不支持白名单式的"仅包含"参数**（脚本本身未实现该能力）——每册调用前先 `ls 响应文件/*.md` 列出全部文件，计算出"本册不需要的文件"作为 `excludeFiles` 传入：
 
-```bash
-# 第一册：资格证明文件
-node {脚本路径} '{"inputDir":"{workDir}/响应文件","outputFile":"{workDir}/投标文件（资格证明文件）-{投标人简称}.docx","headerText":"{采购编号} 投标文件（资格证明文件）","footerCompany":"{公司全称}","includeFiles":["00-资格证明文件.md"]}'
+```
+# 第一册：资格证明文件（排除除 00-资格证明文件.md 外的所有其他 .md）
+generate_docx(
+  inputDir="{workDir}/响应文件",
+  outputFile="{workDir}/投标文件（资格证明文件）-{投标人简称}.docx",
+  headerText="{采购编号} 投标文件（资格证明文件）",
+  footerCompany="{公司全称}",
+  excludeFiles=["01-商务文件.md","02-技术方案.md", "...其余所有非本册文件"]
+)
 
 # 第二册：商务技术文件
-node {脚本路径} '{"inputDir":"{workDir}/响应文件","outputFile":"{workDir}/投标文件（商务技术文件）-{投标人简称}.docx","headerText":"{采购编号} 投标文件（商务技术文件）","footerCompany":"{公司全称}","excludeFiles":["核对报告.md","装订指南.md","00-目录.md","crossref_mapping.json","00-资格证明文件.md"]}'
+generate_docx(
+  inputDir="{workDir}/响应文件",
+  outputFile="{workDir}/投标文件（商务技术文件）-{投标人简称}.docx",
+  headerText="{采购编号} 投标文件（商务技术文件）",
+  footerCompany="{公司全称}",
+  excludeFiles=["核对报告.md","装订指南.md","00-目录.md","crossref_mapping.json","00-资格证明文件.md"]
+)
 ```
 
 字段说明：
@@ -148,17 +146,15 @@ node {脚本路径} '{"inputDir":"{workDir}/响应文件","outputFile":"{workDir
 - `outputFile`：输出文件路径（建议写绝对路径或相对于 inputDir）
 - `headerText`：页眉文字
 - `footerCompany`：页脚公司名
-- `excludeFiles`：排除的文件列表。**始终包含 S8/S10 内部文件**（核对报告、装订指南、00-目录、crossref_mapping 等）
-- `includeFiles`：仅包含的文件列表（优先于 excludeFiles）
+- `excludeFiles`：排除的文件列表。**始终包含 S8/S10 内部文件**（核对报告、装订指南、00-目录、crossref_mapping 等）；多册模式下还要排除"属于其他册"的文件
 
 **执行失败处理**（见下方"异常处理"表）：
 
 | 错误类型 | 症状 | 处理 |
 |---------|------|------|
-| Node.js 未安装 | `node: command not found` | 标注 `FAILED`，建议 `apt install nodejs` |
-| npm 包缺失 | `Cannot find module 'docx'` | 标注 `FAILED`，建议 `cd {脚本目录} && npm install` |
+| npm 包缺失 | `Cannot find module 'docx'` | 标注 `FAILED`，联系管理员检查 skills 目录 node_modules |
 | 输出文件被占用 | `EBUSY` 错误 | 标注 `FAILED`，建议"关闭 Word 后重试" |
-| JSON 解析异常 | 脚本报错但非上述原因 | 检查特殊字符（引号、反斜杠）是否被 shell 错误转义 |
+| 其他生成异常 | 工具返回失败详情 | 按工具返回的错误信息定位，一般是 inputDir 下无 .md 文件或路径不存在 |
 
 ### 3. DocScan 后期增强（可选，需 DocScan 服务在线）
 
