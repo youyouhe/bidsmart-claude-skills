@@ -1014,7 +1014,33 @@ graph TD
 每条响应说明≥3行具体实现描述，禁止空泛语言。
 
 ### ▲功能截图
-必须有占位符 `【此处插入XX功能截图】` + 标注 `（截图需加盖公章）`。
+
+如果有 POC 原型（`<workDir>/poc/` 目录下存在子目录），**必须**截取 POC 页面作为功能截图，替代纯文字占位符。
+
+#### 截图步骤
+
+1. 检查 POC 是否已生成：
+   ```bash
+   ls -d <workDir>/poc/*/index.html 2>/dev/null
+   ```
+
+2. 如果存在 POC 页面，运行截图脚本：
+   ```bash
+   node /mnt/oldroot/home/bird/xyy/smartbid-platform/tools/pptx-converter/screenshot-poc.js <workDir>/poc/ 响应文件/
+   ```
+   脚本输出 JSON 格式的截图清单，包含每个 POC 子目录对应的 PNG 文件名。
+
+3. 读取 JSON 输出，将每个截图映射到技术响应表中对应的需求行（POC 子目录名与需求文档名一致）。
+
+4. 在技术方案正文中插入截图引用（Markdown 图片语法）：
+   ```markdown
+   ![S04 性能预报系统 POC 原型](poc-S04-性能预报系统.png)
+   ```
+   图片文件即保存在 `响应文件/` 目录下，使用相对路径引用即可。
+
+5. 将原 `【此处插入XX功能截图】` 文本占位符替换为对应的 Markdown 图片引用。
+
+如果没有 POC 原型（<workDir>/poc/ 不存在或为空），则保留 `【此处插入XX功能截图】` 占位符 + `（截图需加盖公章）`。
 
 ### 图表处理
 
