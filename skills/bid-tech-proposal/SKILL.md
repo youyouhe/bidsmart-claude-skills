@@ -1024,11 +1024,11 @@ graph TD
    ls -d <workDir>/poc/*/index.html 2>/dev/null
    ```
 
-2. 如果存在 POC 页面，运行截图脚本：
-   ```bash
-   node /mnt/oldroot/home/bird/xyy/smartbid-platform/tools/pptx-converter/screenshot-poc.js <workDir>/poc/ 响应文件/
+2. 如果存在 POC 页面，调用 `poc_screenshot` 工具：
    ```
-   脚本输出 JSON 格式的截图清单，包含每个 POC 子目录对应的 PNG 文件名。
+   poc_screenshot({ pocDir: "<workDir>/poc", outputDir: "<workDir>/响应文件" })
+   ```
+   工具返回 JSON 格式的截图清单，包含每个 POC 子目录对应的 PNG 文件名。
 
 3. 读取 JSON 输出，将每个截图映射到技术响应表中对应的需求行（POC 子目录名与需求文档名一致）。
 

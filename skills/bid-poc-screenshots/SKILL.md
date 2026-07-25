@@ -5,7 +5,7 @@ description: >
   纯机械步骤，无 LLM 推理。运行时自动识别已有的占位符和 POC 子目录的对应关系。
   当用户要求"插入POC截图"、"替换功能截图占位符"、"poc截图"时触发。
   前置条件：响应文件/ 目录下已存在技术标书 .md 文件，且 POC 已生成（workDir/poc/ 下有子目录）。
-tools: [read, write, bash]
+tools: [read, write, bash, poc_screenshot]
 ---
 
 # POC 截图占位符替换
@@ -42,13 +42,15 @@ grep -n '【此处插入.*功能截图】' 响应文件/*.md
 
 如果没有任何占位符，说明技术标书还未编写，输出状态 `SKIPPED`。
 
-### 2. 运行截图脚本
+### 2. 运行截图工具
 
-```bash
-node /mnt/oldroot/home/bird/xyy/smartbid-platform/tools/pptx-converter/screenshot-poc.js <workDir>/poc/ 响应文件/
+调用 `poc_screenshot` 工具（注册为 agent extension，在沙箱外执行 Puppeteer）：
+
+```
+poc_screenshot({ pocDir: "<workDir>/poc", outputDir: "<workDir>/响应文件" })
 ```
 
-脚本输出 JSON 格式的截图清单，如：
+工具返回 JSON 格式的截图清单，如：
 ```json
 {
   "screenshots": [
