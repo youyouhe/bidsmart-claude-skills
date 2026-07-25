@@ -16,15 +16,16 @@ Each directory under `skills/` contains:
 
 The plugin is registered via `.claude-plugin/marketplace.json`.
 
-### The orchestrated 11-stage bid pipeline (bid-manager)
+### The orchestrated 13-stage bid pipeline (bid-manager)
 
-`bid-manager` orchestrates exactly these 11 stages, tracked in `pipeline_progress.json`:
+`bid-manager` orchestrates exactly these 13 stages, tracked in `pipeline_progress.json`:
 
 ```
 S1:分析(bid-analysis) → S2:核实(bid-verification) → S3:信息收集(人工交互，无 skill)
-→ S4:商务标(bid-commercial-proposal) → S5:技术标(bid-tech-proposal) → S6:图表(bid-mermaid-diagrams)
-→ S7:POC截图(bid-poc-screenshots) → S8:扫描件(bid-material-search) → S9:质检(bid-assembly)
-→ S10:自动修复(bid-tech/commercial-proposal 修复模式) → S11:生成Word(bid-md2doc)
+→ S4:商务标(bid-commercial-proposal) → S5:技术标(bid-tech-proposal)
+→ S6:需求规格(bid-requirements) → S7:POC实现(bid-poc) → S8:图表(bid-mermaid-diagrams)
+→ S9:POC截图(bid-poc-screenshots) → S10:扫描件(bid-material-search) → S11:质检(bid-assembly)
+→ S12:自动修复(bid-tech/commercial-proposal 修复模式) → S13:生成Word(bid-md2doc)
 ```
 
 Only S3 requires user interaction (collecting company info / pricing decisions); everything else runs with `AUTO_MODE=true`, skipping prompts and reading pre-collected data from `pipeline_progress.json`.

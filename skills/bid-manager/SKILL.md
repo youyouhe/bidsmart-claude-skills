@@ -20,7 +20,8 @@ description: >
 
 ```
 S1:分析 → S2:核实 → S3:信息收集 → S4:商务标 → S5:技术标
-→ S6:图表 → S7:POC截图 → S8:扫描件 → S9:质检 → S10:自动修复 → S11:生成Word
+→ S6:需求规格 → S7:POC实现 → S8:图表 → S9:POC截图 → S10:扫描件
+→ S11:质检 → S12:自动修复 → S13:生成Word
 ```
 
 | 阶段 | 名称 | 调用 Skill | 说明 | 需用户交互 |
@@ -30,12 +31,14 @@ S1:分析 → S2:核实 → S3:信息收集 → S4:商务标 → S5:技术标
 | S3 | 信息收集 | （人工交互） | 收集公司信息、报价决策 | **是** |
 | S4 | 商务标 | bid-commercial-proposal | 编写商务标全部附件 | 否（自动模式） |
 | S5 | 技术标 | bid-tech-proposal | 编写技术标全部文件 | 否（自动模式） |
-| S6 | 图表 | bid-mermaid-diagrams | 生成并替换图表占位符 | 否 |
-| S7 | POC截图 | bid-poc-screenshots | 截取POC页面并替换功能截图占位符 | 否 |
-| S8 | 扫描件 | bid-material-search | 批量替换扫描件占位符 | 否 |
-| S9 | 质检 | bid-assembly | 全面质检，生成核对报告 | 否 |
-| S10 | 自动修复 | bid-tech/commercial-proposal | 根据质检结果分派修复 | 否 |
-| S11 | 生成Word | bid-md2doc | 转换为最终 Word 文档 | 否 |
+| S6 | 需求规格 | bid-requirements | 编写需求规格书（仅软件项目） | 否（自动模式） |
+| S7 | POC实现 | bid-poc | 基于需求规格自动生成POC原型（仅软件项目） | 否（自动模式） |
+| S8 | 图表 | bid-mermaid-diagrams | 生成并替换图表占位符 | 否 |
+| S9 | POC截图 | bid-poc-screenshots | 截取POC页面并替换功能截图占位符 | 否 |
+| S10 | 扫描件 | bid-material-search | 批量替换扫描件占位符 | 否 |
+| S11 | 质检 | bid-assembly | 全面质检，生成核对报告 | 否 |
+| S12 | 自动修复 | bid-tech/commercial-proposal | 根据质检结果分派修复 | 否 |
+| S13 | 生成Word | bid-md2doc | 转换为最终 Word 文档 | 否 |
 
 ## 进度管理
 
@@ -181,7 +184,36 @@ S1:分析 → S2:核实 → S3:信息收集 → S4:商务标 → S5:技术标
 - 执行 bid-tech-proposal 的完整编写流程
 - 跳过文件规划确认步骤
 
-### S6: 图表
+### S6: 需求规格（仅软件项目）
+
+```
+输入: 分析报告.md + 响应文件/15-技术服务响应表.md
+输出: 项目文档/01-需求分析/_metadata.md + {SXX}-{Name}.md
+调用: bid-requirements (AUTO_MODE=true)
+```
+
+- 如果分析报告中确认项目不涉及软件开发，跳过 S6→S7
+- 在上下文中设置 `AUTO_MODE=true`
+- Phase 0: 自动生成 metadata（行业、系统清单、角色、原型分类）
+- Phase 1: 逐系统编写需求规格书（跳过用户确认）
+- 每 3 个系统汇报一次进度
+- 完成后更新 `pipeline_progress.json`
+
+### S7: POC实现（仅软件项目）
+
+```
+输入: 项目文档/01-需求分析/_metadata.md + {SXX}-{Name}.md
+输出: poc/{SXX}-{Name}/index.html + style.css + script.js
+调用: bid-poc (AUTO_MODE=true)
+```
+
+- 仅在 S6 完成后执行
+- 从 metadata 提取需要 POC 的系统（原型分类含数据录入/统计报表/管理配置/流程审批/移动端）
+- 逐个系统自动生成 HTML/CSS/JS POC 原型
+- 集成类/文书类系统自动跳过
+- 完成后更新 `pipeline_progress.json`
+
+### S8: 图表
 
 ```
 输入: 响应文件/*.md（含图表占位符）
@@ -193,7 +225,7 @@ S1:分析 → S2:核实 → S3:信息收集 → S4:商务标 → S5:技术标
 - 逐个生成 Mermaid 图并渲染为 PNG
 - 替换占位符为图片引用
 
-### S7: POC截图
+### S9: POC截图
 
 ```
 输入: poc/*/index.html + 响应文件/*.md（含功能截图占位符）
@@ -207,7 +239,7 @@ S1:分析 → S2:核实 → S3:信息收集 → S4:商务标 → S5:技术标
 - 调用 screenshot-poc.js 截取 POC 页面为 PNG
 - 将占位符替换为 Markdown 图片引用 `![XX POC](poc-XX.png)`
 
-### S8: 扫描件
+### S10: 扫描件
 
 ```
 输入: 响应文件/*.md（含扫描件占位符）+ 资料库
@@ -220,7 +252,7 @@ S1:分析 → S2:核实 → S3:信息收集 → S4:商务标 → S5:技术标
 - 如果存在，启动检索服务并执行批量替换
 - 记录替换统计
 
-### S9: 质检
+### S11: 质检
 
 ```
 输入: 分析报告.md + 响应文件/*.md
@@ -230,10 +262,10 @@ S1:分析 → S2:核实 → S3:信息收集 → S4:商务标 → S5:技术标
 
 - 执行完整质检流程
 - 解析核对报告末尾的 JSON 摘要
-- 如果 `red_count == 0`，跳过 S10，直接进入 S11
-- 如果 `red_count > 0`，进入 S10
+- 如果 `red_count == 0`，跳过 S12，直接进入 S13
+- 如果 `red_count > 0`，进入 S12
 
-### S10: 自动修复（最多2轮）
+### S12: 自动修复（最多2轮）
 
 ```
 输入: 核对报告.md 中的 ASSEMBLY_SUMMARY JSON
@@ -247,12 +279,12 @@ S1:分析 → S2:核实 → S3:信息收集 → S4:商务标 → S5:技术标
 2. 按 `target_skill` 分组：
    - `bid-tech-proposal` 类问题 → 调用 bid-tech-proposal 修复模式
    - `bid-commercial-proposal` 类问题 → 调用 bid-commercial-proposal 修复模式
-3. 修复完成后，重新执行 S9 质检
+3. 修复完成后，重新执行 S11 质检
 4. 如果仍有 🔴 问题且修复轮次 < 2，再次修复
 5. 如果修复轮次 >= 2 仍有问题，输出剩余问题清单，建议人工处理
 6. 更新 `pipeline_progress.json` 中的 `fix_rounds`
 
-### S11: 生成Word
+### S13: 生成Word
 
 ```
 输入: 响应文件/*.md
