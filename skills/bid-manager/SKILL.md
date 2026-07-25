@@ -20,7 +20,7 @@ description: >
 
 ```
 S1:分析 → S2:核实 → S3:信息收集 → S4:商务标 → S5:技术标
-→ S6:图表 → S7:扫描件 → S8:质检 → S9:自动修复 → S10:生成Word
+→ S6:图表 → S7:POC截图 → S8:扫描件 → S9:质检 → S10:自动修复 → S11:生成Word
 ```
 
 | 阶段 | 名称 | 调用 Skill | 说明 | 需用户交互 |
@@ -31,10 +31,11 @@ S1:分析 → S2:核实 → S3:信息收集 → S4:商务标 → S5:技术标
 | S4 | 商务标 | bid-commercial-proposal | 编写商务标全部附件 | 否（自动模式） |
 | S5 | 技术标 | bid-tech-proposal | 编写技术标全部文件 | 否（自动模式） |
 | S6 | 图表 | bid-mermaid-diagrams | 生成并替换图表占位符 | 否 |
-| S7 | 扫描件 | bid-material-search | 批量替换扫描件占位符 | 否 |
-| S8 | 质检 | bid-assembly | 全面质检，生成核对报告 | 否 |
-| S9 | 自动修复 | bid-tech/commercial-proposal | 根据质检结果分派修复 | 否 |
-| S10 | 生成Word | bid-md2doc | 转换为最终 Word 文档 | 否 |
+| S7 | POC截图 | bid-poc-screenshots | 截取POC页面并替换功能截图占位符 | 否 |
+| S8 | 扫描件 | bid-material-search | 批量替换扫描件占位符 | 否 |
+| S9 | 质检 | bid-assembly | 全面质检，生成核对报告 | 否 |
+| S10 | 自动修复 | bid-tech/commercial-proposal | 根据质检结果分派修复 | 否 |
+| S11 | 生成Word | bid-md2doc | 转换为最终 Word 文档 | 否 |
 
 ## 进度管理
 
@@ -192,7 +193,21 @@ S1:分析 → S2:核实 → S3:信息收集 → S4:商务标 → S5:技术标
 - 逐个生成 Mermaid 图并渲染为 PNG
 - 替换占位符为图片引用
 
-### S7: 扫描件
+### S7: POC截图
+
+```
+输入: poc/*/index.html + 响应文件/*.md（含功能截图占位符）
+输出: 响应文件/poc-*.png + 更新后的 .md 文件
+调用: bid-poc-screenshots
+前置: 需要 POC 已生成（<workDir>/poc/ 下有子目录）
+```
+
+- 如果 POC 目录不存在或为空，跳过此阶段
+- 扫描所有技术文件中的 `【此处插入XX功能截图】` 占位符
+- 调用 screenshot-poc.js 截取 POC 页面为 PNG
+- 将占位符替换为 Markdown 图片引用 `![XX POC](poc-XX.png)`
+
+### S8: 扫描件
 
 ```
 输入: 响应文件/*.md（含扫描件占位符）+ 资料库
@@ -205,7 +220,7 @@ S1:分析 → S2:核实 → S3:信息收集 → S4:商务标 → S5:技术标
 - 如果存在，启动检索服务并执行批量替换
 - 记录替换统计
 
-### S8: 质检
+### S9: 质检
 
 ```
 输入: 分析报告.md + 响应文件/*.md
@@ -215,10 +230,10 @@ S1:分析 → S2:核实 → S3:信息收集 → S4:商务标 → S5:技术标
 
 - 执行完整质检流程
 - 解析核对报告末尾的 JSON 摘要
-- 如果 `red_count == 0`，跳过 S9，直接进入 S10
-- 如果 `red_count > 0`，进入 S9
+- 如果 `red_count == 0`，跳过 S10，直接进入 S11
+- 如果 `red_count > 0`，进入 S10
 
-### S9: 自动修复（最多2轮）
+### S10: 自动修复（最多2轮）
 
 ```
 输入: 核对报告.md 中的 ASSEMBLY_SUMMARY JSON
@@ -232,12 +247,12 @@ S1:分析 → S2:核实 → S3:信息收集 → S4:商务标 → S5:技术标
 2. 按 `target_skill` 分组：
    - `bid-tech-proposal` 类问题 → 调用 bid-tech-proposal 修复模式
    - `bid-commercial-proposal` 类问题 → 调用 bid-commercial-proposal 修复模式
-3. 修复完成后，重新执行 S8 质检
+3. 修复完成后，重新执行 S9 质检
 4. 如果仍有 🔴 问题且修复轮次 < 2，再次修复
 5. 如果修复轮次 >= 2 仍有问题，输出剩余问题清单，建议人工处理
 6. 更新 `pipeline_progress.json` 中的 `fix_rounds`
 
-### S10: 生成Word
+### S11: 生成Word
 
 ```
 输入: 响应文件/*.md
