@@ -89,11 +89,46 @@ read 项目文档/01-需求分析/{SXX}-{Name}.md
 
 3. **`script.js`** — 交互逻辑：
    - Chart.js 图表初始化和模拟数据
-   - Tab 切换
+   - Tab 切换（必须用 `switchTab(tabId)` 函数，tabId 在 manifest 中声明）
    - 模态框/抽屉开关
    - 表单验证
    - 搜索过滤
    - 模拟实时数据更新
+
+4. **`.manifest.json`**（最后写）— **功能点-Tab 映射契约**，供下游 `bid-poc-screenshots` 精确截图：
+
+   ```json
+   {
+     "system": "S04-性能预报系统",
+     "functionPoints": [
+       {
+         "id": "S04-001",
+         "name": "实时性能预报",
+         "tabId": "realtime",
+         "tabLabel": "实时性能预报",
+         "priority": "P1",
+         "switchMethod": "switchTab('realtime')"
+       },
+       {
+         "id": "S04-002",
+         "name": "多方案优化比选",
+         "tabId": "optimization",
+         "tabLabel": "多方案优化比选",
+         "priority": "P2",
+         "switchMethod": "switchTab('optimization')"
+       }
+     ]
+   }
+   ```
+
+   **manifest 规则：**
+   - `id` / `name`：从需求规格书逐字复制功能编号和名称
+   - `tabId`：POC 中该功能对应 Tab 的 id（与 `tabs` 数组 / `switchTab()` 参数一致）
+   - `tabLabel`：Tab 按钮上显示的文字（截图时用于匹配技术方案小节标题）
+   - `switchMethod`：切换到该视图的可执行 JS（如 `switchTab('realtime')`）
+   - **每个 P1 功能点必须有一条 manifest 记录**，P2 功能点如有独立 Tab 也记录
+
+   这个文件是 POC 和截图之间的**显式契约**，确保截图能精确定位到每个功能视图。
 
 #### 1.4 质量检查（生成后立即执行）
 
