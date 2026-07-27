@@ -3,11 +3,24 @@
 使用 MaterialHub 聚合 API 提取公司和人员的完整信息。
 """
 
+import re
 import httpx
 from typing import Any
 
 # Load configuration
 from config import API_BASE, API_TOKEN
+
+
+def _norm_name(s: str) -> str:
+    """名称归一化：全角括号→半角、去空白，用于精确匹配判断"""
+    return re.sub(r"\s+", "", s or "").replace("（", "(").replace("）", ")")
+
+
+def _pick_exact(entities: list, name: str) -> list:
+    """多匹配时优先归一化精确匹配（如全称查询命中总公司而非分公司）；
+    恰好一个精确匹配则收窄，否则原样返回让调用方消歧"""
+    exact = [e for e in entities if _norm_name(e.get("name", "")) == _norm_name(name)]
+    return exact if len(exact) == 1 else entities
 
 
 def _headers() -> dict:
@@ -48,15 +61,22 @@ async def extract_company_data(company_name: str) -> dict:
         ent_data = await _get("/api/v2/entities/", {"q": company_name, "entity_type": "org", "limit": 5})
         entities = ent_data.get("results", [])
 
+        # 全角/半角括号不一致会导致 ilike 子串匹配落空（库内多为半角），用归一化名称重试一次
+        if not entities and _norm_name(company_name) != company_name:
+            ent_data = await _get("/api/v2/entities/", {"q": _norm_name(company_name), "entity_type": "org", "limit": 5})
+            entities = ent_data.get("results", [])
+
         if not entities:
             return {"error": f"未找到公司: {company_name}"}
+
+        entities = _pick_exact(entities, company_name)
 
         if len(entities) > 1:
             # 返回多个匹配，让调用方选择
             return {
                 "error": "找到多个匹配的公司",
                 "matches": [
-                    {"id": e["id"], "name": e["name"]}
+                    {"id": e["id"], "name": e["name"], "document_count": e.get("document_count", 0)}
                     for e in entities
                 ]
             }
