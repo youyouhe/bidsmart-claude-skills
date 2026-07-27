@@ -255,7 +255,7 @@ grep -cP '[┌┐└┘├┤┬┴┼═║╔╗╚╝]|[─━]{2,}|[─━].
 ##### 5.5.1 检查 DocScan 可用性
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8800/api/health
+curl -s -o /dev/null -w "%{http_code}" -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/health"
 ```
 
 - **返回 200** → 继续 5.5.2
@@ -269,14 +269,14 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8800/api/health
 # 拼接所有响应文件（按序号排序，排除内部文件和 S8 自身产出）
 cat $(ls 响应文件/[0-9]*.md | grep -v '00-目录\|核对报告\|装订指南\|crossref_mapping\|扫描件\|Word文档待完善\|信息填写进度\|资料检索') > /tmp/assembly_preflight.md
 # 上传到 DocScan
-FID=$(curl -s -X POST http://localhost:8800/api/md2docx \
+FID=$(curl -s -X POST -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/md2docx" \
   -F "file=@/tmp/assembly_preflight.md" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
 ```
 
 ##### 5.5.3 格式预检
 
 ```bash
-curl -s http://localhost:8800/api/docx/$FID/preview
+curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/$FID/preview"
 ```
 
 DocScan 预检发现的问题按以下标准分级写入核对报告：
@@ -297,7 +297,7 @@ DocScan 预检发现的问题按以下标准分级写入核对报告：
 ##### 5.5.4 占位符精确审计（OOXML 级别）
 
 ```bash
-curl -s http://localhost:8800/api/docx/$FID/placeholders
+curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/$FID/placeholders"
 ```
 
 将 DocScan 返回的占位符清单与步骤 5.3（markdown grep）的结果对比：

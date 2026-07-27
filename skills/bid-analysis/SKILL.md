@@ -103,19 +103,19 @@ python .claude/skills/bid-analysis/scripts/parse_excel.py <excel路径> --output
 
 **方式 A（优先）：DocScan 转换服务**
 
-先检查默认地址是否在线（默认 `http://localhost:8800`）：
+先检查服务是否在线。地址取自环境变量 `DOCSCAN_URL`（未设置时默认 `http://localhost:8800`）；远程/带鉴权部署时平台会注入 `DOCSCAN_API_KEY`，本地无鉴权可留空——所有 DocScan 调用都带上 `-H "X-API-Key: ${DOCSCAN_API_KEY:-}"`：
 ```bash
-curl -s http://localhost:8800/api/health
+curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/health"
 ```
 
 若返回正常（HTTP 200），使用服务转换：
 ```bash
 # 上传 .docx，获取 fid（返回 JSON 字符串，如 "abc123"）
-FID=$(curl -s -X POST http://localhost:8800/api/convert \
+FID=$(curl -s -X POST -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/convert" \
   -F "file=@文件路径.docx" | python -c "import sys,json; print(json.load(sys.stdin))")
 
 # 获取全部页面的 Markdown（含文本和表格），同时保存到本地以备核实
-curl -s "http://localhost:8800/api/md/$FID" | tee docscan_output.md
+curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/md/$FID" | tee docscan_output.md
 ```
 
 服务返回的 Markdown 已包含文档的段落和表格（表格基于版式检测，渲染为 `|` 分隔的 Markdown 表格），直接作为分析输入使用。**极少数复杂排版**（如单元格内嵌套小表格、无边框纯空格对齐的伪表格）可能未被正确识别为表格——如某处应为表格的内容在 Markdown 中呈现为一段不规则纯文本，且恰好包含关键数据（金额、分值、分值明细），须结合原 Word/PDF 交叉核对，不可直接采信可能已错位的文本。
@@ -124,9 +124,9 @@ curl -s "http://localhost:8800/api/md/$FID" | tee docscan_output.md
 
 若 `curl` 无响应、超时或返回非 200，**不要直接跳到方式 B**，先向用户提问：
 
-> DocScan 服务在默认地址 `http://localhost:8800` 未检测到。是否使用其他地址？请提供实际 URL；如果没有可用的 DocScan 服务，回复"本地提取"将使用 python-docx 直接解析。
+> DocScan 服务在当前地址（`$DOCSCAN_URL`，未设置时 `http://localhost:8800`）未检测到。是否使用其他地址？请提供实际 URL；如果没有可用的 DocScan 服务，回复"本地提取"将使用 python-docx 直接解析。
 
-- 用户提供了新 URL → 对该地址重新执行 `/api/health` 检查，成功则后续 `/api/convert`、`/api/md/{fid}` 请求均使用该地址（本次分析范围内有效，不写回配置文件）
+- 用户提供了新 URL → 在本次会话内 `export DOCSCAN_URL=<用户提供的 URL>`（同样会自动带上 `DOCSCAN_API_KEY` 鉴权头），随后重新执行 `/api/health` 检查，成功则后续 `/api/convert`、`/api/md/{fid}` 请求都用该地址（本次分析范围内有效，不写回配置文件）
 - 用户选择本地提取 → 转到方式 B
 
 **方式 B（用户选择本地提取，或明确没有可用 DocScan 服务时）：python-docx**

@@ -165,12 +165,12 @@ generate_docx(
 #### 3.0 检查 DocScan 可用性
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8800/api/health
+curl -s -o /dev/null -w "%{http_code}" -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/health"
 ```
 
 - **返回 200** → 继续 3.1
 - **连接失败/超时** → 跳过整个步骤 3，输出提示：
-  > DocScan 服务（`http://localhost:8800`）当前不可用，跳过后期增强（交叉引用、占位符清扫）。已生成的 docx 文件不受影响，可正常使用。
+  > DocScan 服务（`$DOCSCAN_URL`，未设置时 `http://localhost:8800`）当前不可用，跳过后期增强（交叉引用、占位符清扫）。已生成的 docx 文件不受影响，可正常使用。
   
   然后直接跳到步骤 4（报告生成结果）
 - **AUTO_MODE=true** 时 DocScan 不可用 → 同上跳过，在完成状态中标注"DocScan 离线，跳过后期增强"
@@ -180,7 +180,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8800/api/health
 将 generate_docx.js 生成的 docx 上传到 DocScan，使其可被编辑：
 
 ```bash
-FID=$(curl -s -X POST http://localhost:8800/api/docx/upload \
+FID=$(curl -s -X POST -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/upload" \
   -F "file=@{outputFile路径}" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
 echo "DocScan FID: $FID"
 ```
@@ -189,7 +189,7 @@ echo "DocScan FID: $FID"
 ```bash
 # 对每个 docx 执行
 for docx in "{workDir}/投标文件（资格证明文件）-{投标人简称}.docx" "{workDir}/投标文件（商务技术文件）-{投标人简称}.docx"; do
-  FID=$(curl -s -X POST http://localhost:8800/api/docx/upload -F "file=@$docx" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+  FID=$(curl -s -X POST -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/upload" -F "file=@$docx" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
   echo "DocScan FID for $docx: $FID"
   # 记录 FID → 文件映射，供 3.2-3.4 循环使用
 done
@@ -198,7 +198,7 @@ done
 #### 3.2 占位符最终清扫
 
 ```bash
-curl -s http://localhost:8800/api/docx/$FID/placeholders | python3 -c "
+curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/$FID/placeholders" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 phs = data.get('placeholders', [])
@@ -240,7 +240,7 @@ for ph in phs:
 **3.3.1 列出所有表格，定位索引表**
 
 ```bash
-curl -s http://localhost:8800/api/docx/$FID/tables
+curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/$FID/tables"
 ```
 
 LLM 分析返回的表格列表，找到索引表（特征：含有"序号"/"附件名称"/"文件"/"页码"等列头）。记录索引表的 `table[N]` 路径。
@@ -248,7 +248,7 @@ LLM 分析返回的表格列表，找到索引表（特征：含有"序号"/"附
 **3.3.2 获取正文段落，匹配索引项**
 
 ```bash
-curl -s http://localhost:8800/api/docx/$FID/preview
+curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/$FID/preview"
 ```
 
 LLM 分析返回的段落列表，为索引表中的每个附件找到正文中对应的首次出现位置：
@@ -267,7 +267,7 @@ LLM 分析返回的段落列表，为索引表中的每个附件找到正文中�
 对索引表中需要页码的每一行：
 
 ```bash
-curl -s -X POST http://localhost:8800/api/docx/$FID/crossref \
+curl -s -X POST -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/$FID/crossref" \
   -H "Content-Type: application/json" \
   -d '{
     "keyword": "{正文中唯一的关键文本}",
@@ -301,7 +301,7 @@ DocScan 内部自动完成：
 #### 3.4 下载增强后的 docx
 
 ```bash
-curl -s http://localhost:8800/api/docx/$FID -o "{outputFile路径}"
+curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/$FID" -o "{outputFile路径}"
 ```
 
 覆盖原始的 generate_docx.js 输出文件，完成增强。
