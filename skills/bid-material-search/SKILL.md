@@ -55,11 +55,25 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8201/health
 
   **不可**：编造材料数据、留空处理后假装已完成、或在未告知用户的情况下静默跳过占位符替换。占位符留空是可以接受的结果（用户知情后可后续手动处理），但"看起来完成了但其实没有真实数据支撑"是不可接受的。
 
-- **AUTO_MODE（bid-manager S7 阶段调用）下的处理**：不能停下来等待用户交互，但仍必须在完成状态摘要的 `状态` 字段标注 `FAILED`（而非 `SUCCESS`），并在摘要中写明"MaterialHub 服务不可用，本阶段未执行任何替换"，供 bid-manager 决定是否跳过本阶段继续流程（参考 CLAUDE.md"Graceful degradation"原则：可选服务不可用时应跳过并警告，不是静默视为成功）。
+- **AUTO_MODE（bid-manager S11 扫描件阶段调用）下的处理**：不能停下来等待用户交互，但仍必须在完成状态摘要的 `状态` 字段标注 `FAILED`（而非 `SUCCESS`），并在摘要中写明"MaterialHub 服务不可用，本阶段未执行任何替换"，供 bid-manager 决定是否跳过本阶段继续流程（参考 CLAUDE.md"Graceful degradation"原则：可选服务不可用时应跳过并警告，不是静默视为成功）。
 
 ## 主要功能
 
 ### 1. 材料搜索
+
+**标准检索流程（实体优先，禁止只跑一次关键词就放弃）：**
+
+按以下优先级逐级检索，前一级命中即可继续，**零命中才进下一级**；各级命中项累积，不互相替代：
+
+1. **实体聚合（已知公司/人员时首选）**：`get_company_complete(company_name)` / `get_person_complete(person_name)` —— 一次拿全营业执照 + 资质证书 + 人员 + 统计。最稳入口，胜过关键词盲搜。
+2. **实体下钻枚举**：`list_entity_documents(entity_name)` —— 列出该实体名下全部文档，避免漏掉关键词没命中的材料。
+3. **关键词检索（兜底主路径）**：`search_documents(query, doc_type?, folder_path?, status?)` —— 多关键词组合（公司名 + 文档类型 + 同义词），支持过滤。
+4. **语义/多跳检索（前三级零命中时）**：`kb_search(query, mode="hybrid"|"multihop")` —— 跨实体、跨事件图谱的语义匹配，能找到关键词搜不到的关联材料（如经业绩合同间接关联的子公司资质）。**本 skill 既往版本未用它，是检索偏弱的根因之一。**
+5. **实体图谱探索（仍零命中时）**：`kb_get_entity_graph(entity_name, depth=2)` —— 看实体周边关系，发现可用关联实体再回到第 1 步。
+
+**阴性结果规则（最易被忽略，必须执行）：** 任一占位符走完全部级别仍零命中，**必须**在批量替换结果里把它列入"未替换占位符清单"（计入 `failed_count`，语义界定为"零命中"而非"下载失败"），并在完成状态块报告 `未替换占位符: N` 及清单。**禁止**静默保留占位符假装完成，也禁止把"零命中"混入 `ambiguous_count`。
+
+下面是各级 API 的调用示例：
 
 ```python
 from bid_material_search.search import search_materials_sync
@@ -119,8 +133,22 @@ data = extract_company_data_sync("珞信通达（北京）科技有限公司")
 #     "certificates": [
 #         {
 #             "title": "ISO27001信息安全管理体系认证",
-#             "cert_number": "016ZB25I30045R1S",
-#             "expiry_date": "2028-02-27",
+#             "cert_number": "016ZB25I30045R1S",        # 证书编号（必填）
+#             "issuing_authority": "XXX认证有限公司",     # 发证机构（必填）
+#             "issue_date": "2025-02-27",                # 发证日期（必填）
+#             "valid_until": "2028-02-27",               # 有效期至（必填）
+#             "scope": "信息安全管理体系覆盖范围",         # 认证/适用范围（必填）
+#             "expiry_date": "2028-02-27",               # valid_until 的同义别名，保留以兼容旧消费方
+#             ...
+#         },
+#         ...
+#     ],
+#     "performance_contracts": [   # 业绩合同/中标合同（既往版本静默丢弃，现必须输出）
+#         {
+#             "title": "XX平台建设项目合同",
+#             "client_name": "甲方公司全称",              # 甲方名称（必填）
+#             "contract_amount": "350万元",               # 合同金额（必填）
+#             "signing_date": "2024-06-15",               # 签订时间（必填）
 #             ...
 #         },
 #         ...
@@ -143,6 +171,14 @@ data = extract_company_data_sync("珞信通达（北京）科技有限公司")
 #     }
 # }
 ```
+
+#### 🔒 字段契约（提取阶段必须遵守，禁止静默丢弃字段）
+
+`extract_company_data_sync` / `extract_person_data_sync` 的返回结果是下游商务标、业绩表、资质文件的唯一数据源——**字段缺失会直接传染到最终投标文件**，落成 `【待补充】` 占位符。因此强制契约如下：
+
+- **`certificates[]` 每项必须包含**：`cert_number`（证书编号）、`issuing_authority`（发证机构）、`issue_date`（发证日期）、`valid_until`（有效期至）、`scope`（认证/适用范围）。任一字段缺失时，**必须**调用 `get_document_detail(doc_id)` 回填——MaterialHub 详情层的 `extracted_data` JSON 通常已存有这些字段（聚合接口 `get_company_complete` 未必平铺返回），不回填即等于丢弃。仍无法获取才可置空，并计入未回填清单。
+- **`performance_contracts[]`（业绩合同）每项必须包含**：`client_name`（甲方名称）、`contract_amount`（合同金额）、`signing_date`（签订时间）。缺失则同样回查 `get_document_detail`，**不得在脚本层静默丢弃整个合同材料**（既往版本只筛 `cert`/`qualification` 类型，合同类材料被整体忽略，是业绩字段丢失的根因）。
+- **同步修订提取脚本**：若本 skill 目录下存在 `extract.py` 等提取脚本，必须同步修订其字段映射，确保从 MaterialHub 详情（`metadata.extracted_data`、`summary`、原文 OCR）中解析并输出上述字段，**不得在脚本层静默丢弃**。仅依赖聚合接口的浅层字段、或字段名拼写不一致（如把 `issuing_authority` 写成 `issue_authority` 导致永远读到空值），是既往丢失证书编号/发证机构的根因。
 
 #### 提取人员数据
 
@@ -230,7 +266,7 @@ result = replace_placeholder_sync(
 
 **过期检查（`expiry_warning` 字段）**：只要材料 `is_expired=True` 或 30 天内到期，返回结果会带上 `expiry_warning` 提示。即使替换本身成功（图片已插入），也必须把这条提示展示给用户，不可因为"success: True"就忽略——过期证书插入投标文件可能导致废标，这是比格式问题更严重的风险。
 
-#### 批量替换所有占位符（AUTO_MODE，由 bid-manager 在 S7 阶段调用）
+#### 批量替换所有占位符（AUTO_MODE，由 bid-manager 在 S11 阶段调用）
 
 ```python
 from bid_material_search.replace import replace_all_placeholders_sync
@@ -253,7 +289,7 @@ result = replace_all_placeholders_sync(
 # }
 ```
 
-**⚠️ AUTO_MODE 下的歧义和过期材料不是"已解决"，而是"延后到质检环节"**：`ambiguous_count > 0` 或 `expiry_warning_count > 0` 时，必须在完成状态摘要中明确列出，供 S8 质检（bid-assembly）复核这些存疑替换是否正确、过期材料是否需要更新。不可因为 `replaced_count` 达标就视为完全成功。
+**⚠️ AUTO_MODE 下的歧义和过期材料不是"已解决"，而是"延后到质检环节"**：`ambiguous_count > 0` 或 `expiry_warning_count > 0` 时，必须在完成状态摘要中明确列出，供 S12 质检（bid-assembly）复核这些存疑替换是否正确、过期材料是否需要更新。不可因为 `replaced_count` 达标就视为完全成功。
 
 **占位符格式**：
 - `【此处插入营业执照扫描件】`
@@ -265,6 +301,19 @@ result = replace_all_placeholders_sync(
 - 自动为复制的图片添加项目名称水印（右下角，50%透明度）
 - 自动保存图片到响应文件目录
 - 自动更新 Markdown 文件的图片引用
+
+#### 🔒 消费侧写文件：空值强制回查 MaterialHub，禁止直接落【待补充】
+
+> 此规则约束**消费侧数据写入**——即下游 skill（`bid-commercial-proposal` 等）在写信誉材料、业绩表、资质文件时，使用本 skill 提取的结构化数据填空。扫描件占位符（`【此处插入XX扫描件】`）的替换由上文规则约束；本规则约束的是**文本字段写入**时不得用 `【待补充】` 掩盖空值。
+
+写信誉材料/业绩表/资质文件前，若发现以下字段为空，**必须强制回查 MaterialHub**，**不得直接落 `【待补充】` 占位符**：
+
+| 字段类型 | 必填字段 | 回查方式 |
+|---|---|---|
+| 证书 | `cert_number`（证书编号）、`issuing_authority`（发证机构） | `get_document_detail(doc_id)` 读 `extracted_data` / `summary` |
+| 业绩合同 | `client_name`（甲方）、`contract_amount`（金额）、`signing_date`（签订时间） | `get_document_detail(doc_id)`；若该文档无抽取信息，用 `list_entity_documents(entity_name)` 枚举同实体下其他相关文档（合同甲方常记载在关联的验收报告/发票/中标通知书里）继续回查 |
+
+回查仍无结果时，才可在输出文件中标注 `【待人工补充：证书编号】`（**明确写出缺失字段名**，而非笼统的 `【待补充】`），并在完成状态摘要中计入 `未回填字段` 清单，供 bid-assembly（S12 质检）复核。**禁止**：未经回查直接落 `【待补充】`、把"未回查"伪装成"零数据"、或在 `success`/`replaced_count` 指标中隐瞒空字段。
 
 ### 4. 水印工具
 
@@ -345,9 +394,9 @@ for person in company_data['persons']:
     print(f"{person['name']} - {person['position']} - {person['education']}")
 ```
 
-### 场景 3: bid-manager S7 阶段调用
+### 场景 3: bid-manager S11 阶段调用
 
-在 bid-manager 的 S7（扫描件）阶段，批量替换所有占位符（AUTO_MODE，不可交互）：
+在 bid-manager 的 S11（扫描件）阶段，批量替换所有占位符（AUTO_MODE，不可交互）：
 
 ```python
 from bid_material_search.replace import replace_all_placeholders_sync
@@ -367,11 +416,11 @@ result = replace_all_placeholders_sync(
 
 print(f"成功替换: {result['replaced_count']} 个")
 print(f"失败: {result['failed_count']} 个")
-print(f"存疑（歧义未确认）: {result['ambiguous_count']} 个 — 需 S8 质检复核")
-print(f"过期/临期材料: {result['expiry_warning_count']} 个 — 需 S8 质检复核")
+print(f"存疑（歧义未确认）: {result['ambiguous_count']} 个 — 需 S12 质检复核")
+print(f"过期/临期材料: {result['expiry_warning_count']} 个 — 需 S12 质检复核")
 ```
 
-**S7 阶段的完成状态摘要必须包含 `ambiguous_count` 和 `expiry_warning_count`**，供 bid-assembly（S8质检）读取并列入核对报告，不可只汇报 `replaced_count`/`failed_count` 而遗漏这两项存疑指标。
+**S11 阶段的完成状态摘要必须包含 `ambiguous_count` 和 `expiry_warning_count`**，供 bid-assembly（S12质检）读取并列入核对报告，不可只汇报 `replaced_count`/`failed_count` 而遗漏这两项存疑指标。
 
 ## 性能对比
 
@@ -455,10 +504,10 @@ sudo apt-get install fonts-wqy-microhei
 
 ### bid-manager
 
-bid-manager 在 S7 阶段会调用本 skill：
+bid-manager 在 S11 阶段会调用本 skill：
 
 ```python
-# bid-manager 的 S7 阶段
+# bid-manager 的 S11 阶段
 from bid_material_search.replace import replace_all_placeholders_sync
 
 result = replace_all_placeholders_sync("响应文件", project_name)
@@ -477,15 +526,15 @@ company_data = extract_company_data_sync(company_name)
 
 ## 完成状态
 
-批量替换完成后（bid-manager S7 阶段调用时），输出以下结构化状态摘要：
+批量替换完成后（bid-manager S11 阶段调用时），输出以下结构化状态摘要：
 
 ```
 --- BID-MATERIAL-SEARCH COMPLETE ---
 处理文件数: {total_files}
 成功替换: {replaced_count}
 失败: {failed_count}
-存疑（AUTO_MODE下歧义未经人工确认）: {ambiguous_count}，需S8质检复核
-过期/临期材料: {expiry_warning_count}，需S8质检复核
+存疑（AUTO_MODE下歧义未经人工确认）: {ambiguous_count}，需S12质检复核
+过期/临期材料: {expiry_warning_count}，需S12质检复核
 输出目录: 响应文件/
 状态: SUCCESS
 --- END ---

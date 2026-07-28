@@ -4,7 +4,7 @@ description: >
   基于需求规格书自动生成每个系统的 POC 前端原型。不属于 web-builder 交互式流程，
   而是 bid-manager pipeline 的专用 AUTO_MODE skill——从需求文档直接生成完整
   HTML/CSS/JS 原型，无需用户输入。逐系统处理，产出到 poc/{SXX}-{Name}/ 目录。
-  当用户要求"自动生成POC"、"批量生成原型"时触发；由 bid-manager S7 自动调用。
+  当用户要求"自动生成POC"、"批量生成原型"时触发；由 bid-manager S8 自动调用。
   前置条件：bid-requirements 已完成，项目文档/01-需求分析/ 下有系统需求文档。
 tools: [read, write, bash]
 ---
@@ -42,6 +42,12 @@ tools: [read, write, bash]
 ### 0. 初始化
 
 在 `<workDir>/poc/` 目录下创建 `.gitkeep` 标记文件（如果目录不存在则先创建目录）。
+
+0.1 读取 system_decomposition.json，提取所有 systems[].code 与 name，作为子系统目录命名的唯一事实源。
+
+0.2 幂等清理（每次运行必做）：列出 poc/ 下已有子目录，凡目录名（按 S0x 前缀 + 名称，名称先按 0.3 的归一化规则处理）不在 systems 列表中的，一律 rm -rf 删除——这是上次错位运行的遗留物，会污染下游截图与正文引用。
+
+0.3 目录命名硬约束：每个子目录名必须为 {code}-{name}。name 取自 system_decomposition.json，但**文件系统不安全字符（/ \\ : * ? " < > | 及空格）须统一替换为连字符 -** 后再作为目录名（例：name 为 `Mini-CEX/DOPS评价系统` 时，目录名为 `S07-Mini-CEX-DOPS评价系统`）。清理比对与命名时，两侧都先做同一归一化再比较，避免因 `/`→`-` 误判为孤儿目录而误删。不得自行改写系统名，不得编造 system_decomposition.json 中不存在的系统（如把数字教材/医学数据库当作独立子系统目录）。
 
 ### 1. 逐系统生成
 
@@ -127,6 +133,7 @@ read 项目文档/01-需求分析/{SXX}-{Name}.md
    - `tabLabel`：Tab 按钮上显示的文字（截图时用于匹配技术方案小节标题）
    - `switchMethod`：切换到该视图的可执行 JS（如 `switchTab('realtime')`）
    - **每个 P1 功能点必须有一条 manifest 记录**，P2 功能点如有独立 Tab 也记录
+   - **tabId 唯一性（强制）**：manifest 中每个 functionPoint 必须对应唯一 tabId，不得让多个 functionPoint 共享同一 tabId。若一个 tab 承载多个功能点，必须拆分为独立 tab（如 dashboard-arch / dashboard-security），或对该 tab 只记录一次并把多个功能点 id 关联到同一截图。违反将导致下游 screenshot-poc.js 重复截图。
 
    这个文件是 POC 和截图之间的**显式契约**，确保截图能精确定位到每个功能视图。
 

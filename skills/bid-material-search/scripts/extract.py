@@ -51,7 +51,11 @@ async def extract_company_data(company_name: str) -> dict:
         {
             "company": {"name": "...", "id": ..., ...},
             "license": {"credit_code": "...", "legal_person": "...", ...},
-            "certificates": [{"title": "...", "cert_number": "...", ...}],
+            "certificates": [{"title": "...", "cert_number": "...",
+                              "issuing_authority": "...", "issue_date": "...",
+                              "valid_until": "...", "scope": "..."}],
+            "performance_contracts": [{"title": "...", "client_name": "...",
+                                       "contract_amount": "...", "signing_date": "..."}],
             "persons": [{"name": "...", "gender": "...", ...}],
             "statistics": {"total_materials": 74, "total_employees": 12, ...}
         }
@@ -101,23 +105,61 @@ async def extract_company_data(company_name: str) -> dict:
     aggregated = data.get("aggregated_info", {})
     stats = data.get("statistics", {})
 
-    # 提取证书（从材料中筛选）
+    # 提取证书（从材料中筛选）——字段契约见 SKILL.md「字段契约」小节：
+    # cert_number/issuing_authority/issue_date/valid_until/scope 缺一不可。
     certificates = []
+    performance_contracts = []
     for mat in materials:
         doc_type = mat.get("doc_type", {})
         doc_type_code = doc_type.get("code", "")
+        extracted = mat.get("metadata", {}).get("extracted_data", {}) or {}
 
         # 识别为证书类型的材料
         if "cert" in doc_type_code or "qualification" in doc_type_code:
-            cert_data = mat.get("metadata", {}).get("extracted_data", {})
+            # 发证机构在 MaterialHub extracted_data 中可能存为
+            # issuing_authority 或 issue_authority，两者都读以防字段名
+            # 拼写不一致导致永远读到空值（既往静默丢失的根因）。
+            issuing = (
+                extracted.get("issuing_authority")
+                or extracted.get("issue_authority")
+                or ""
+            )
             certificates.append({
                 "title": mat.get("title", ""),
-                "cert_name": cert_data.get("cert_name", ""),
-                "cert_number": cert_data.get("cert_number", ""),
+                "cert_name": extracted.get("cert_name", ""),
+                "cert_number": extracted.get("cert_number", ""),
+                "issuing_authority": issuing,
+                "issue_date": extracted.get("issue_date", ""),
+                "valid_until": extracted.get("valid_until") or mat.get("expiry_date", ""),
                 "expiry_date": mat.get("expiry_date", ""),
-                "issue_date": cert_data.get("issue_date", ""),
-                "issue_authority": cert_data.get("issue_authority", ""),
-                "scope": cert_data.get("scope", ""),
+                "scope": extracted.get("scope", ""),
+            })
+
+        # 识别为业绩合同/中标合同材料——既往版本在此整体跳过，
+        # 导致甲方/金额/签订时间在结构化数据中彻底缺失，是消费侧
+        # 落【待补充】占位符的根因之一。
+        if "contract" in doc_type_code or "performance" in doc_type_code:
+            performance_contracts.append({
+                "title": mat.get("title", ""),
+                "client_name": (
+                    extracted.get("client_name")
+                    or extracted.get("party_a")
+                    or extracted.get("甲方")
+                    or ""
+                ),
+                "contract_amount": (
+                    extracted.get("contract_amount")
+                    or extracted.get("amount")
+                    or extracted.get("合同金额")
+                    or ""
+                ),
+                "signing_date": (
+                    extracted.get("signing_date")
+                    or extracted.get("contract_date")
+                    or extracted.get("签订日期")
+                    or ""
+                ),
+                "expiry_date": mat.get("expiry_date", ""),
             })
 
     # 提取人员信息
@@ -146,6 +188,7 @@ async def extract_company_data(company_name: str) -> dict:
         },
         "license": license_info,
         "certificates": certificates,
+        "performance_contracts": performance_contracts,
         "persons": persons,
         "aggregated_info": aggregated,
         "statistics": stats,
