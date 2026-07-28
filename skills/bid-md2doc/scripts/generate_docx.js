@@ -219,7 +219,9 @@ function parseImage(line, baseDir) {
     // 导致 DocScan 后期增强（OOXML 解析）报 500（Content_Types 不识别 .undefined）。
     const validExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'];
     if (!validExts.includes(ext)) {
-      console.warn(`generate_docx: 不支持的图片格式 ${ext || '(无扩展名)'}: ${imgPath}，以占位符替代`);
+      // ⚠️ 用 console.log（非 warn）：docx-generator 扩展只把 stdout 回显给运行日志，
+      // console.warn 走 stderr 在成功路径下被吞掉，畸形图片会被静默占位替代。
+      console.log(`generate_docx: ⚠️ 不支持的图片格式 ${ext || '(无扩展名)'}: ${imgPath}，以红色占位符替代（否则会致 DocScan 后期增强 500）`);
       return new Paragraph({
         children: [new TextRun({ text: `[图片格式不支持: ${imgPath}]`, color: 'FF0000' })],
       });

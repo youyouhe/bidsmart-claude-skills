@@ -103,7 +103,25 @@ python .claude/skills/bid-analysis/scripts/parse_excel.py <excel路径> --output
 
 **方式 A（优先）：DocScan 转换服务**
 
-先检查服务是否在线。地址取自环境变量 `DOCSCAN_URL`（未设置时默认 `http://localhost:8800`）；远程/带鉴权部署时平台会注入 `DOCSCAN_API_KEY`，本地无鉴权可留空——所有 DocScan 调用都带上 `-H "X-API-Key: ${DOCSCAN_API_KEY:-}"`：
+地址解析：Web 会话由平台注入 `DOCSCAN_URL`；CLI/插件会话从平台同步到磁盘的 `services.env`（DB 权威）加载。下方引导块统一两种上下文，未配置时回退 `http://localhost:8800`。远程/带鉴权部署时平台会注入 `DOCSCAN_API_KEY`，所有 DocScan 调用都带上 `-H "X-API-Key: ${DOCSCAN_API_KEY:-}"`：
+
+```bash
+# ── DocScan 配置引导（Web 内嵌 / CLI 插件 通用；每次用 DocScan 前执行一次）──────
+# 消除 ${DOCSCAN_URL} 为空时静默回退 localhost:8800 导致的「DocScan 离线」误判。
+# Web：DOCSCAN_URL 已由平台注入（沙箱继承）→ 跳过文件加载，env 为权威（避免磁盘旧值覆盖）。
+# CLI：$DOCSCAN_URL 为空 → 从平台同步到磁盘的 services.env 加载（DB 权威源；API 启动与设置变更时刷新）。
+if [ -z "${DOCSCAN_URL:-}" ]; then
+  for _f in "${DOCSCAN_CONFIG_FILE:-}" \
+            "${SMARTBID_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/smartbid}/services.env" \
+            "${XDG_CONFIG_HOME:-$HOME/.config}/smartbid/services.env"; do
+    [ -n "$_f" ] && [ -f "$_f" ] && [ -r "$_f" ] && { set -a; . "$_f"; set +a; break; }
+  done
+  unset _f
+fi
+: "${DOCSCAN_URL:=http://localhost:8800}"   # 仍未配置则保留本地默认；离线由可用性检测兜底
+```
+
+先检查服务是否在线：
 ```bash
 curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/health"
 ```

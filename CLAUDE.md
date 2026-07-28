@@ -105,7 +105,7 @@ Image/screenshot/scan placeholders use a **unique-id + JSON registry** pattern s
 - `分析报告.md` — exact name required; every downstream skill reads it. Also fixed: `响应文件/` numbered files, `pipeline_progress.json`, `diagram-N.png` (sequential).
 
 ### DocScan (docx → per-page Markdown, `docscan/` submodule)
-Two-stage startup: `docscan/start.sh [port]` first brings up an ONLYOFFICE Docker container (port 8079, JWT disabled, mounts `docscan/fonts/` for CJK) via `docker compose up -d`, then starts the FastAPI service on port 8800. There is no env var for the URL — callers assume `http://localhost:8800`. The call workflow (health → convert → md/{fid}) and the python-docx fallback are documented in `skills/bid-analysis/SKILL.md` §1.2 — read that, not here.
+Two-stage startup: `docscan/start.sh [port]` first brings up an ONLYOFFICE Docker container (port 8079, JWT disabled, mounts `docscan/fonts/` for CJK) via `docker compose up -d`, then starts the FastAPI service on port 8800. `DOCSCAN_URL`/`DOCSCAN_API_KEY` 由平台解析（DB 权威）：Web 会话（BidAgentService 子进程，bwrap 继承 API 进程 env）直接用；CLI/插件会话的 shell 拿不到 API 进程 env，由平台把 DB 配置同步到 `${SMARTBID_CONFIG_DIR:-~/.config/smartbid}/services.env`，skill 在调 DocScan 前用一个引导块 `source` 它（见 `bid-analysis`/`bid-md2doc`/`bid-assembly` 的 DocScan 段；三处逐字节相同，改一处须同步另两处——为可移植性刻意内联，不抽 `_shared/`）。未配置时回退 `http://localhost:8800`。The call workflow (health → convert → md/{fid}) and the python-docx fallback are documented in `skills/bid-analysis/SKILL.md` §1.2 — read that, not here.
 
 ### Document parsing strategy (Word/PDF/Excel)
 Fully specified in `skills/bid-analysis/SKILL.md` §0–1: Word-first priority, parse_pdf/extract_pdf_toc/ocr_pages flow, parse_excel outputs, tables extracted fully and never summarized. Do not restate it here.
@@ -120,7 +120,7 @@ Fully specified in `skills/bid-analysis/SKILL.md` §0–1: Word-first priority, 
 - `config.py` looks for `.env` in cwd → repo root → material-hub root, in that order; only `skills/bid-material-search/.env.example` exists.
 
 ### Optional external services (all fail gracefully with a warning)
-DocScan `localhost:8800` (needs Docker for ONLYOFFICE) · MaterialHub API `localhost:8201` (`MATERIALHUB_API_URL`/`MATERIALHUB_API_KEY`, separate repo) · OCR via `OCR_SERVICE_URL`. archify-server (port 18800, used by bid-mermaid-diagrams) runs OUTSIDE the bwrap sandbox because Chrome/Puppeteer needs full system access; only gantt/ER diagrams still go through Mermaid+mmdc.
+DocScan `localhost:8800` 默认（可经系统设置 `services.docscanUrl`/`docscanApiKey` 配远程地址；平台同步到 env 与 `services.env`，见上节；needs Docker for ONLYOFFICE） · MaterialHub API `localhost:8201` (`MATERIALHUB_API_URL`/`MATERIALHUB_API_KEY`, separate repo) · OCR via `OCR_SERVICE_URL`. archify-server (port 18800, used by bid-mermaid-diagrams) runs OUTSIDE the bwrap sandbox because Chrome/Puppeteer needs full system access; only gantt/ER diagrams still go through Mermaid+mmdc.
 
 ## Skill development guidelines
 
