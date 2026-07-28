@@ -67,6 +67,40 @@ Versioning: conventional commits + git tags. CHANGELOG.md has two conflicting `[
 
 ## Key implementation details
 
+### Placeholder registry (占位符对照表机制 v1)
+
+Image/screenshot/scan placeholders use a **unique-id + JSON registry** pattern so replacement is **lookup-based, not text/prefix guessing** (the old text-match approach caused mis-replacement, missed variant placeholders like `【此处展示…】`, and duplicate-image confusion).
+
+**Placeholder format** (regex): `【此处插入:(截图|图表|扫描件):<id>】`，其中 `<id>` 为 `[A-Za-z0-9_-]+`。
+- `截图` id = `system_decomposition.json` 里该功能点的 id（如 `S01-001`）——已唯一，**直接复用**，不要为截图新造 id。
+- `图表` id = 语义 slug（如 `sys-arch`）；`扫描件` id = 材料类型码（如 `business-license`）。仅当无自然唯一键时用 `uuid-<短码>`（用 helper 脚本生成，**禁止让 LLM 凭空造 UUID**）。
+
+**对照表文件**：项目工作目录根的 `placeholders.json`（与 `分析报告.md` 同级）。
+
+**Schema**：
+```json
+{ "version": 1, "items": [
+  { "id": "S01-001", "type": "screenshot", "system": "S01", "function_point": "S01-001",
+    "label": "系统架构与多终端支持", "source_file": "15-技术要求响应材料.md",
+    "status": "pending", "asset": null },
+  { "id": "sys-arch", "type": "diagram", "title": "系统总体架构图",
+    "source_file": "16-技术方案.md", "status": "pending", "asset": null },
+  { "id": "business-license", "type": "scan", "material_type": "business_license",
+    "source_file": "00-资格证明文件合集.md", "status": "pending", "asset": null }
+]}
+```
+- `type` ∈ `screenshot` | `diagram` | `scan`。
+- `status` ∈ `pending`（写入方登记）| `done`（替换方替换后回填 `asset`）。
+- `asset` = 产物相对路径（png / 扫描件图），由替换方填写。
+
+**写入方**（`bid-tech-proposal` 写 截图/图表，`bid-commercial-proposal` 写 扫描件）：每在正文写一个占位符，就向 `placeholders.json` upsert 对应 item（按 `id` 幂等去重）。
+
+**替换方**（`bid-poc-screenshots` / `bid-mermaid-diagrams` / `bid-material-search`）：读 `placeholders.json`，filter `type` = 自己的领域 且 `status` = `pending`，用 `id` 在 `source_file` 里精确定位 `【此处插入:<type>:<id>】`，替换为产物，回填 `status` = `done` + `asset`。**不做文字/前缀/label 猜测——id 是唯一连接键。**
+
+**校验方**（`bid-assembly`）：闭环核对——(a) 每个表内 `id` 在其 `source_file` 中有且仅有 1 个占位符；(b) 正文中每个占位符的 `id` 都在表里；(c) 每个 `done` item 的 `asset` 文件确实存在；(d) 所有替换器跑完后仍 `pending` 的 item → 🔴。以此捕获"表与正文漂移"。
+
+老项目里的 legacy 占位符 `【此处插入XX图/截图/扫描件】`（无 id）仍由 `bid-assembly` §5.3 兜底清扫；**新项目一律用对照表**。
+
 ### File naming (hardcoded dependencies)
 - `分析报告.md` — exact name required; every downstream skill reads it. Also fixed: `响应文件/` numbered files, `pipeline_progress.json`, `diagram-N.png` (sequential).
 

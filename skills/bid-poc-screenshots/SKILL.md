@@ -1,10 +1,10 @@
 ---
 name: bid-poc-screenshots
 description: >
-  将 POC 原型页面截取为 PNG 截图，并替换技术标书中的【此处插入XX功能截图】占位符。
-  纯机械步骤，无 LLM 推理。运行时自动识别已有的占位符和 POC 子目录的对应关系。
+  将 POC 原型页面截取为 PNG 截图，并按 placeholders.json 对照表替换技术标书中的【此处插入:截图:<id>】占位符。
+  纯机械步骤，无 LLM 推理。id 查表精确定位，不做文字/前缀/label 猜测（对照表机制见 packages/bidsmart-skills/CLAUDE.md "Placeholder registry" 段）。
   当用户要求"插入POC截图"、"替换功能截图占位符"、"poc截图"时触发。
-  前置条件：响应文件/ 目录下已存在技术标书 .md 文件，且 POC 已生成（workDir/poc/ 下有子目录）。
+  前置条件：响应文件/ 目录下已存在技术标书 .md 文件，工作目录根有 placeholders.json，且 POC 已生成（workDir/poc/ 下有子目录）。
 tools: [read, write, bash, poc_screenshot]
 ---
 
@@ -12,7 +12,7 @@ tools: [read, write, bash, poc_screenshot]
 
 ## 工作模式
 
-**纯机械操作** —— 不需要 LLM 编写任何内容，只做文本查找替换 + 调用截图脚本。
+**纯机械操作** —— 不需要 LLM 编写任何内容，只做对照表查表 + 文本查找替换 + 调用截图脚本。**id 是唯一连接键，不做文字/前缀/label 猜测**（参见 `packages/bidsmart-skills/CLAUDE.md` "Placeholder registry" 段）。
 
 ## 前置检查
 
@@ -22,27 +22,23 @@ tools: [read, write, bash, poc_screenshot]
    ```
    如果返回 0，则没有 POC 可截图，输出状态 `SKIPPED` 并结束。
 
-2. 确认技术标书文件存在：
+2. 确认技术标书文件与对照表存在：
    ```bash
    ls 响应文件/*.md 2>/dev/null
+   ls placeholders.json 2>/dev/null
    ```
-   如果没有 .md 文件，输出状态 `SKIPPED` 并结束。
+   - 没有 .md 文件 → 状态 `SKIPPED` 并结束。
+   - 没有 placeholders.json → 走 §3 legacy 兜底路径（仅扫旧式无 id 占位符）。
+
+3. 探活浏览器运行时（避免 Puppeteer 在沙箱外启动失败后空等超时，详见 gotchas.md）：
+   ```bash
+   curl -s /api/v1/health/preflight 2>/dev/null | grep -o '"puppeteer":"[^"]*"' || true
+   ```
+   不可用时直接 `状态: SKIPPED, 原因: 浏览器运行时不可用`，不徒劳调用。
 
 ## 工作流程
 
-### 1. 统计占位符
-
-扫描 `响应文件/` 下所有 .md 文件，找出所有 `【此处插入XX功能截图】` 占位符：
-
-```bash
-grep -n '【此处插入.*功能截图】' 响应文件/*.md
-```
-
-将结果列出，供后续步骤参考匹配关系。
-
-如果没有任何占位符，说明技术标书还未编写，输出状态 `SKIPPED`。
-
-### 2. 运行截图工具（多视图自动发现）
+### 1. 运行截图工具（多视图自动发现）
 
 调用 `poc_screenshot` 工具（注册为 agent extension，在沙箱外执行 Puppeteer）：
 
@@ -50,77 +46,73 @@ grep -n '【此处插入.*功能截图】' 响应文件/*.md
 poc_screenshot({ pocDir: "<workDir>/poc", outputDir: "<workDir>/响应文件" })
 ```
 
-工具会**自动发现每个 POC 页面中的 Tab/功能按钮**，加载页面后先截取默认视图，再逐一点击发现的 Tab 按钮截取各功能视图。返回 JSON 格式，每个 POC 子目录下有多个截图：
+工具会**自动发现每个 POC 页面中的 Tab/功能按钮**，加载页面后先截取默认视图，再逐一点击发现的 Tab 按钮截取各功能视图，并为每个视图记录所属功能点 id（`functionPointId`）。返回 JSON 截图清单，并把 **functionPointId → file 映射**写入 `<workDir>/响应文件/screenshots-map.json`（含跨视图去重复用，供本 skill 查表）。
 
+**核对返回的截图数量**：若截图为 0 张或工具报错，完成状态块必须标 `FAILED` 并写明原因（参见 gotchas.md，禁止用"待手动生成"掩盖失败）。
+
+screenshots-map.json 示例：
 ```json
 {
-  "screenshots": [
-    {
-      "subDir": "S04-性能预报系统",
-      "viewCount": 4,
-      "screenshots": [
-        {"label": "默认",   "file": "poc-S04-性能预报系统.png", "sizeBytes": 469608},
-        {"label": "实时预报", "file": "poc-S04-性能预报系统-实时预报.png", "sizeBytes": 523000},
-        {"label": "方案比选", "file": "poc-S04-性能预报系统-方案比选.png", "sizeBytes": 498000},
-        {"label": "结果评估", "file": "poc-S04-性能预报系统-结果评估.png", "sizeBytes": 510000}
-      ]
-    },
-    {
-      "subDir": "S05-系统管理平台",
-      "viewCount": 5,
-      "screenshots": [
-        {"label": "默认", "file": "poc-S05-系统管理平台.png", "sizeBytes": 319454},
-        {"label": "S05-001用户权限管理 P1", "file": "poc-S05-系统管理平台-S05-001用户权限管理_P1.png", "sizeBytes": 319454},
-        ...
-      ]
-    }
+  "version": 1,
+  "views": [
+    {"functionPointId": "S04-001", "file": "poc-S04-性能预报系统-实时预报.png"},
+    {"functionPointId": "S04-002", "file": "poc-S04-性能预报系统-方案比选.png"},
+    {"functionPointId": "S05-001", "file": "poc-S05-系统管理平台-S05-001.png"}
   ]
 }
 ```
 
-### 3. 建立映射并替换（多截图分布式插入）
+### 2. 查表替换（主路径：对照表 id 精确定位）
 
-将步骤 1 找到的每个占位符与步骤 2 的截图匹配。**按系统编号分级匹配**：
+读工作目录根的 `placeholders.json`，filter `type == "screenshot" && status == "pending"`。对每个 item：
 
-**第一步 — 系统级匹配（定位 POC）：**
-- 从占位符提取系统编号（正则 `S\d{2}`，如 `S04`）
-- 从截图清单找 subDir 以相同编号开头的项
-- 一个占位符可能对应多张截图（默认 + 各 Tab）
+**(a) 用 item.id 在 item.source_file 精确定位占位符** —— 正则匹配 `【此处插入:截图:<item.id>】`，id 取 item.id 原值（= `system_decomposition.json` 中该功能点的 FP-id）。**不做文字/前缀/label 猜测，id 是唯一连接键。**
 
-**第二步 — 按视图标签分配截图位置：**
-- 如果该 POC 只有 1 张截图 → 直接替换占位符
-- 如果该 POC 有多张截图 → 按以下规则分配：
+**(b) 解析 id → png 文件**：
+- 首选：读 `响应文件/screenshots-map.json`，构建 `{functionPointId: file}` 映射，取 `item.id` 对应的 file（含跨视图去重复用）。
+- 兜底（screenshots-map.json 缺失或该 id 未命中）：回退命名约定 `poc-<subdir>-<id>.png`，其中 `<subdir>` 由 `system_decomposition.json` 的 `code+name`（经文件系统不安全字符 `/ \ : * ? " < > |` 及空格归一化为 `-`）得到。
+- 仍无匹配 → **保留占位符不动**，item 维持 `pending` 供 bid-assembly 标红（不伪造 done）。
 
-1. **默认视图**（label="默认"）：放在占位符所在段落，作为系统整体截图
-2. **功能 Tab 视图**（label 含功能描述如"实时预报""方案比选""S05-001"）：
-   在技术方案中**找到与视图 label 关键词匹配的功能小节**（如视图 label "S05-001用户权限管理" → 找到 `### 用户权限管理` 小节），
-   在该小节正文末尾插入对应的截图引用。若无精确匹配的小节，全部截图排在占位符位置。
-
-**第三步 — 替换/插入 Markdown 图片引用：**
-
-对每个截图的插入位置，用 `edit` 工具将占位符文本替换为 Markdown 图片引用：
+**(c) 替换占位符**为 Markdown 图片引用：
 
 ```
-【此处插入S04性能预报系统功能截图】（截图需加盖公章）
+【此处插入:截图:S04-001】
 →
-默认视图：
-![S04 性能预报系统 - 概览](poc-S04-性能预报系统.png)
-各功能视图：
-![S04 性能预报系统 - 实时预报](poc-S04-性能预报系统-实时预报.png)
-![S04 性能预报系统 - 方案比选](poc-S04-性能预报系统-方案比选.png)
+![<item.label 或 系统名 - 功能点>](<file>)
 ```
 
-**第四步 — 无法匹配：**
-- 保留占位符原文不动（可能是手工截图需求或其他非 POC 场景）
+label 优先取 item.label；缺失时取 `system_decomposition.json` 里该功能点的 name。
 
-### 4. 输出结果
+**(d) 回填 placeholders.json**：该 item `status="done"`，`asset=<file 相对路径>`（相对工作目录根，如 `响应文件/poc-S04-性能预报系统-实时预报.png`）。按 id 幂等更新。
+
+### 3. legacy 兜底扫描（无 id 的旧占位符）
+
+`placeholders.json` 缺失、或正文残留旧式无 id 占位符时，扫描 `响应文件/` 下所有 .md 文件：
+
+```bash
+grep -n '【此处插入.*功能截图】' 响应文件/*.md
+```
+
+对命中的 legacy 占位符（如 `【此处插入S04性能预报系统功能截图】`），沿用旧的**系统编号 `S\d{2}` 匹配 subDir** 方式分配默认视图截图（多截图时按视图 label 关键词匹配功能小节末尾插入）。**此为兜底，新项目一律走 §2 对照表主路径；legacy 占位符不写回 placeholders.json。**
+
+### 4. 自检
+
+所有 `type == "screenshot"` 的 item 处理完后：
+
+```bash
+grep -c '【此处插入:截图:' 响应文件/*.md
+```
+
+source_file 中**不得残留** `【此处插入:截图:...】`；残留则对应 item 维持 `pending`（不伪造 done），供 bid-assembly 闭环标红。
+
+### 5. 输出结果
 
 ```markdown
 --- BID-POC-SCREENSHOTS COMPLETE ---
-状态: SUCCESS
+状态: SUCCESS | SKIPPED | FAILED
 截图总数: N
 替换成功: M
-未匹配占位符: K
+未匹配占位符(仍 pending): K
 截图清单:
   - poc-S04-性能预报系统.png (462 KB)
   - poc-S05-系统管理平台.png (319 KB)

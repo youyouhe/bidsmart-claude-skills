@@ -325,6 +325,114 @@ curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:88
 - 完成状态中标注"DocScan 预检跳过"
 - crossref_mapping.json 仍需生成（不依赖 DocScan）
 
+#### 5.6 占位符对照表闭环校验
+
+本节是**对照表机制的校验方**（契约见 `packages/bidsmart-skills/CLAUDE.md` "Placeholder registry" 段），与 §5.3 互补，两者都做、不可互相替代：
+
+- **§5.3 兜底清扫** legacy 无 id 占位符（形如 `【此处插入XX图/截图/扫描件】`）
+- **本节闭环校验** 对照表 id 占位符（形如 `【此处插入:<type>:<id>】`）
+
+**前置**：若工作目录根存在 `placeholders.json`（与 `分析报告.md` 同级），加载之并执行以下 4 项检查；不存在则本节整体跳过（legacy 项目走 §5.3 即可）。占位符正则为 `【此处插入:(截图|图表|扫描件):<id>】`，其中 `<id>` ∈ `[A-Za-z0-9_-]+`。
+
+##### 5.6.1 检查项
+
+对 `placeholders.json` 中每个 item（schema 见 CLAUDE.md，`type` ∈ `screenshot|diagram|scan`，对应中文 `截图|图表|扫描件`）：
+
+- **(a) 表→正文 一对一**：item.id 在 item.source_file 中应【有且仅有1个】占位符 `【此处插入:<中文类型>:<id>】`。
+  - 0 个 = 正文丢了占位符（🔴，"对照表登记了但正文找不到"）
+  - \>1 个 = 重复占位符（🔴，"同一 id 被多次插入，替换会产生重复产物"）
+- **(b) 正文→表 反查（孤儿占位符）**：扫描所有 `响应文件/*.md` 中的 `【此处插入:(截图|图表|扫描件):<id>】`，每个 id 都应在 placeholders.json 中存在。不在表里 = 孤儿占位符（🔴，"正文有占位符但对照表未登记，替换器不会处理它"）。
+- **(c) done 资产落地（假完成）**：status=="done" 的 item，其 asset 指向的文件必须存在。不存在 = 假完成（🔴，"对照表标记已完成但产物文件缺失"）。
+- **(d) 仍 pending（未替换）**：所有替换阶段（`bid-poc-screenshots` / `bid-mermaid-diagrams` / `bid-material-search`）跑完后，仍 status=="pending" 的 item → 未替换（🔴，附 item.id 与 type，由 bid-manager 按 type 分派对应替换器）。
+
+##### 5.6.2 可复核的检查命令
+
+以下 Python 脚本一次性完成 (a)(b)(c)(d) 4 项检查，只读不写，输出每条问题的级别与具体 id/文件。在工作目录根执行：
+
+```bash
+python3 -c "
+import json, re, os, glob
+
+# 中文类型 <-> 英文 type 映射
+TYPE_CN = {'screenshot': '截图', 'diagram': '图表', 'scan': '扫描件'}
+# 占位符正则（捕获中文类型 + id）
+PH_RE = re.compile(r'【此处插入:(截图|图表|扫描件):([A-Za-z0-9_-]+)】')
+errors = []
+
+# 加载对照表（不存在则跳过本节）
+if not os.path.exists('placeholders.json'):
+    print('NOTE: placeholders.json 不存在，5.6 跳过（legacy 项目走 §5.3）')
+    raise SystemExit(0)
+with open('placeholders.json', encoding='utf-8') as f:
+    reg = json.load(f)
+items = reg.get('items', [])
+ids_in_registry = {it['id'] for it in items}
+
+# (a) 表→正文 一对一
+for it in items:
+    src = it.get('source_file')
+    if not src or not os.path.exists(src):
+        errors.append(f'(a) 🔴 id={it[\"id\"]} source_file 缺失或不存在: {src}')
+        continue
+    with open(src, encoding='utf-8') as f:
+        content = f.read()
+    cn = TYPE_CN.get(it.get('type'), '?')
+    exact = f'【此处插入:{cn}:{it[\"id\"]}】'
+    n = content.count(exact)
+    if n == 0:
+        errors.append(f'(a) 🔴 id={it[\"id\"]} 在 {src} 中找到 0 个占位符（正文丢了占位符）')
+    elif n > 1:
+        errors.append(f'(a) 🔴 id={it[\"id\"]} 在 {src} 中找到 {n} 个占位符（重复）')
+
+# (b) 正文→表 反查（孤儿占位符）
+for md in sorted(glob.glob('响应文件/*.md')):
+    with open(md, encoding='utf-8') as f:
+        for m in PH_RE.finditer(f.read()):
+            pid = m.group(2)
+            if pid not in ids_in_registry:
+                errors.append(f'(b) 🔴 孤儿占位符 id={pid} 在 {md} 出现，但不在 placeholders.json')
+
+# (c) done 资产落地（假完成）
+for it in items:
+    if it.get('status') == 'done':
+        asset = it.get('asset')
+        if not asset or not os.path.exists(asset):
+            errors.append(f'(c) 🔴 id={it[\"id\"]} status=done 但 asset 缺失/不存在: {asset}')
+
+# (d) 仍 pending（未替换）
+for it in items:
+    if it.get('status') == 'pending':
+        errors.append(f'(d) 🔴 id={it[\"id\"]} type={it.get(\"type\")} 仍 pending（未替换）')
+
+if errors:
+    print('PLACEHOLDER_REGISTRY_CHECK: FAIL')
+    for e in errors:
+        print(' -', e)
+else:
+    print('PLACEHOLDER_REGISTRY_CHECK: PASS（对照表与正文闭环自洽）')
+"
+```
+
+> **grep 兜底**（无 python 环境时可用以下命令做粗筛，但不如 python 脚本精确）：
+> ```bash
+> # 反查孤儿占位符：列出正文所有 id 占位符，与对照表 id 比对
+> grep -rhoE '【此处插入:(截图|图表|扫描件):[A-Za-z0-9_-]+】' 响应文件/*.md | sort -u
+> python3 -c "import json;print('\n'.join(sorted(i['id'] for i in json.load(open('placeholders.json'))['items'])))"
+> ```
+
+**结果落地**：脚本输出的每条 🔴 必须写进核对报告"详细问题清单"及 `ASSEMBLY_SUMMARY` JSON 的 `red_issues[]`，`target_skill` 按 type 选：`screenshot`→`bid-poc-screenshots`、`diagram`→`bid-mermaid-diagrams`、`scan`→`bid-material-search`。
+
+##### 5.6.3 与 §5.3 的分工（互补，都做）
+
+| 维度 | §5.3 兜底清扫 | §5.6 对照表闭环 |
+|------|--------------|----------------|
+| 扫描对象 | legacy 无 id 占位符 `【此处插入XX图/截图/扫描件】` | 对照表 id 占位符 `【此处插入:<type>:<id>】` |
+| 数据源 | 仅正文 grep | `placeholders.json` × 正文双向比对 |
+| 典型命中 | 老项目遗留、写入方未升级到对照表 | 表与正文漂移、替换器漏跑、asset 丢失 |
+| 适用项目 | 全部项目 | 启用了对照表机制的项目（有 `placeholders.json`） |
+
+启用对照表的新项目：§5.3 仍保留（防个别写入方漏登记 item 之外的 legacy 残留），§5.6 (b) 专查"正文有 id 占位符但未进表"的孤儿。两者覆盖面不同，缺一不可。
+
 ### 6. 输出
 
 生成以下文件到 `响应文件/` 目录：
