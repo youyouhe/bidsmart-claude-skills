@@ -224,6 +224,7 @@ print('NOTE: 确定性转换校验需完整数字→大写映射算法，此脚�
 
 - 统计响应表中的条目数
 - 与分析报告中的技术需求功能条目数比对
+- **▲/★ 标注条目数核对**：统计响应表中标 ▲、标 ★ 的条目数，与 `system_decomposition.json` 的 `totals.▲` / `totals.★`（无 json 时回退到分析报告完成摘要的 `▲功能条目` 计数）比对。▲ 是实质性指标，数量不符 = 高风险遗漏，记 🔴 并在核对报告写明差异（见下方 R3 示例）
 - 检查是否有空响应行（响应说明为空或过短）
 
 #### 5.2 报价明细
@@ -518,6 +519,12 @@ SCRIPTS=/mnt/oldroot/home/bird/xyy/smartbid-platform/packages/bidsmart-skills/sk
     {
       "id": "R2",
       "description": "技术响应表条目数不匹配（应有120条，实有115条）",
+      "file": "15-技术服务响应表.md",
+      "target_skill": "bid-tech-proposal"
+    },
+    {
+      "id": "R3",
+      "description": "技术响应表 ▲ 标注条目数不匹配（应有9条▲，实有5条▲）——实质性指标可能遗漏",
       "file": "15-技术服务响应表.md",
       "target_skill": "bid-tech-proposal"
     }

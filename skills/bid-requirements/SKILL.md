@@ -118,7 +118,12 @@ EOF
 
 ### 0.3 系统清单与分域
 
-从技术响应表中提取全部系统，按业务领域分组：
+**数据源优先级（禁止自行重新划分系统编号）：**
+
+1. **首选 `system_decomposition.json`**（工作目录根，由 bid-system-decomp 生成，全流水线单一事实源）：直接镜像其 `systems[]` 到下面的 `## 系统清单` / `## 系统拆分计划` 两表——`code` / `name` / `size_grade` / `original_refs` / `function_point_count` 原样填入，**不重新编号、不重命名、不跳号**。功能点 id（`S01-001`…）仍由本 skill 在 Phase 1 按 `original_refs` 回查分析报告取需求原文后枚举。
+2. **json 不存在时**（兜底）：从技术响应表 / 分析报告中提取全部系统，按下述分域原则自行分组，并在 `_metadata.md` 顶部标注 `⚠️ system_decomposition.json 缺失，系统划分为本 skill 自行推断`。
+
+json 路径下，系统清单表与拆分计划表的填充方式：
 
 ```markdown
 ## 系统清单
@@ -140,7 +145,7 @@ EOF
 | **合计** | | **{总数}** | **{总▲}** | |
 ```
 
-分域原则：
+分域原则（**仅 system_decomposition.json 缺失的兜底路径适用**；json 路径下分域已由 bid-system-decomp 完成，本 skill 不得改动）：
 - 按业务流程的上下游关系分组
 - 同一业务域的系统放在同一分册
 - 基础设施/平台/合规类单独成册
