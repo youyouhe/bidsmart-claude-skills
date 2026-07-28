@@ -207,6 +207,64 @@ data = extract_person_data_sync("周杨")
 
 ### 3. 占位符替换
 
+> **本节双路径**（占位符对照表机制 v1，见 `packages/bidsmart-skills/CLAUDE.md` "Placeholder registry" 段）：
+> - **主路径（新项目）§3.0**：按 `placeholders.json` 中 `type=="scan"` item 的 `id` 精确定位 `【此处插入:扫描件:<id>】`，用 `material_type` 检索材料。**id 是唯一连接键，不做文字/前缀/label 猜测。** 新项目 writer（`bid-commercial-proposal`）已按此契约登记，必须走此路径。
+> - **legacy 兜底（旧项目）§3.1 起**：仅用于 `placeholders.json` 缺失、或正文残留 `【此处插入XX扫描件】`（无 id）的老项目。**新项目一律走 §3.0。**
+
+#### 3.0 主路径：对照表查表替换扫描件（scan 替换方职责）
+
+本 skill 是 `type=="scan"` 的**替换方**；writer（`bid-commercial-proposal`）负责登记 item。
+
+**前置检查（主路径专用，替换前必须先执行）**：
+
+```bash
+# 1. 工作目录根 placeholders.json 是否存在 type==scan 的 pending item
+jq '[.items[] | select(.type=="scan" and .status=="pending")] | length' placeholders.json 2>/dev/null
+# 2. MaterialHub 在线（参见上文「服务可用性检测」）
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8201/health
+```
+
+- `placeholders.json` 缺失 / 返回 0（无 `type==scan` pending item）→ 跳过主路径，进入 §3.1 legacy 兜底。
+- MaterialHub 不可用 → 按上文「服务可用性检测」处理：**不得假装完成**，占位符原样保留、item 维持 `pending`；AUTO_MODE 下状态摘要标 `FAILED`（不可静默视为成功）。
+
+**处理流程**（对每个 `type=="scan" && status=="pending"` 的 item）：
+
+1. **定位占位符**：用 `item.id` 在 `item.source_file` 里正则匹配 `【此处插入:扫描件:<item.id>】`。**id 取 item.id 原值，不做文字/前缀/label 猜测——id 是唯一连接键。**
+2. **确定材料类型**：检索关键词取 `item.material_type`（如 `business_license`、`iso27001`）；`material_type` 缺失时用 `item.id` 去序号（剥掉尾部 `-数字` 序号）作为材料类型码近似。
+3. **按 material_type + 公司名检索扫描件图**，优先级沿用 §1「材料搜索」的多级流程（实体优先，关键词兜底）：
+   - `get_company_complete(company_name)`：一次拿全营业执照 + 资质证书 + 业绩合同，按 `doc_type.code == material_type` 在 `license` / `certificates` / `performance_contracts` 中筛目标材料；
+   - `list_entity_documents(company_name)`：枚举实体名下全部文档，按 `doc_type.code` 过滤；
+   - `search_documents(query=<材料中文名>, doc_type=<material_type>, entity_name=<company_name>)`：关键词兜底。
+   - 检索时**仍需遵守下文歧义规则**（命中多份不静默取第一个）。
+4. **下载/复制扫描件图到 `响应文件/`**，命名 `material-<item.id>.<ext>`（如 `material-business-license.png`）。按需加水印（§4 水印工具）。
+5. **替换占位符**为 Markdown 图片引用：
+
+   ```
+   【此处插入:扫描件:business-license】
+   →
+   ![<材料名>](响应文件/material-business-license.png)
+   ```
+
+   `<材料名>` 取材料的 `title`（或 doc_type 中文名 + 实体名）。
+6. **MaterialHub 无此材料** → **保留占位符不动**，item 维持 `pending`（供 bid-assembly §5.6 闭环标红、供用户手工补），**不伪造 done、不擅自插无关材料**。"MaterialHub 不可用/无数据时不得假装完成" 是本 skill 不可让步的原则。
+7. **回填 placeholders.json**：成功替换的 item `status="done"`、`asset=<图相对路径>`（相对工作目录根，如 `响应文件/material-business-license.png`），按 `id` 幂等更新。
+
+**自检（主路径收尾必跑）**：
+
+```bash
+# (a) 列出已 done 的 scan item 的 id，逐个核对 source_file 中对应 id 的占位符应已替换、不得残留
+jq -r '.items[] | select(.type=="scan" and .status=="done") | .id' placeholders.json
+# 对每个 id：grep -c "【此处插入:扫描件:<id>】" <source_file> 应为 0
+# (b) 查不到材料的 item 应维持 pending（不应伪造 done）
+jq '[.items[] | select(.type=="scan" and .status=="pending")] | length' placeholders.json
+```
+
+已查到材料并替换的 item 在 source_file 中**不得残留** `【此处插入:扫描件:<id>】`；查不到材料的 item **维持 pending**（不伪造 done），供 bid-assembly（S12 质检）§5.6 闭环标红。
+
+#### 3.1 legacy 兜底路径（无 id 占位符 / placeholders.json 缺失）
+
+> 以下流程处理 `placeholders.json` 缺失、或正文残留旧式无 id 占位符（`【此处插入XX扫描件】`）的老项目。**新项目一律走 §3.0 主路径；legacy 占位符不写回 placeholders.json。**
+
 **🚨 关键原则：搜索命中多个候选材料时，不静默取第一个。**
 
 **前置检查（替换类操作执行前，必须先执行）**：在批量/单个替换占位符前，先确认 `响应文件/` 目录下确实存在待替换的占位符（由 `bid-tech-proposal`/`bid-commercial-proposal` 生成）：
@@ -291,10 +349,9 @@ result = replace_all_placeholders_sync(
 
 **⚠️ AUTO_MODE 下的歧义和过期材料不是"已解决"，而是"延后到质检环节"**：`ambiguous_count > 0` 或 `expiry_warning_count > 0` 时，必须在完成状态摘要中明确列出，供 S12 质检（bid-assembly）复核这些存疑替换是否正确、过期材料是否需要更新。不可因为 `replaced_count` 达标就视为完全成功。
 
-**占位符格式**：
-- `【此处插入营业执照扫描件】`
-- `【此处插入ISO认证】`
-- `【此处插入XX】`（任意材料名称）
+**占位符格式**（双格式，新项目走对照表格式）：
+- 新格式（对照表，§3.0 主路径）：`【此处插入:扫描件:<id>】`，其中 `<id>` = 材料类型码（如 `business-license`、`iso27001`）；写入方 `bid-commercial-proposal` 同步向 `placeholders.json` upsert 一条 `type:"scan"` item
+- legacy 格式（无 id，§3.1 兜底）：`【此处插入营业执照扫描件】`、`【此处插入ISO认证】`、`【此处插入XX】`（任意材料名称）
 
 **自动功能**：
 - 自动从分析报告（`分析报告.md`）提取项目名称

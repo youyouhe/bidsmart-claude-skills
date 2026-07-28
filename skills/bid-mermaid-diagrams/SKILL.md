@@ -2,8 +2,11 @@
 name: bid-mermaid-diagrams
 description: >
   为投标文件中的图表占位符渲染 Mermaid 图为 PNG 图片。
-  扫描 markdown 文件中的【此处插入XX图】占位符，优先提取占位符后已有的
-  Mermaid 代码块直接渲染（上游 bid-tech-proposal 已按规范编写好代码），
+  主路径读 placeholders.json 对照表，取 type 为 diagram 且 status 为 pending 的 item，
+  用 item.id 精确定位 【此处插入:图表:<id>】，渲染 PNG 后回填 done 与 asset
+  （占位符对照表机制契约 v1，见 packages/bidsmart-skills/CLAUDE.md "Placeholder registry" 段）；
+  placeholders.json 缺失或正文残留无 id 旧占位符时，退化 legacy 兜底扫描 【此处插入XX图】。
+  优先提取占位符后已有的 Mermaid 代码块直接渲染（上游 bid-tech-proposal 已按规范编写好代码），
   兼容处理旧格式的 ASCII 图转换，渲染为高清 PNG，
   然后替换占位符为 markdown 图片引用。
   架构图/流程图/时序图/数据流图/状态机默认改用内置的 archify 渲染引擎，
@@ -52,14 +55,17 @@ curl http://127.0.0.1:18800/health
 
 ### 0. 前置检查（必须先执行）
 
-检查 `响应文件/` 目录下是否存在包含图表占位符的 `.md` 文件（由 `bid-tech-proposal`/`bid-commercial-proposal` 生成）：
+检查 `响应文件/` 目录下是否存在包含图表占位符的 `.md` 文件（由 `bid-tech-proposal`/`bid-commercial-proposal` 生成），以及工作目录根是否有 `placeholders.json`：
 
 ```bash
+ls placeholders.json 2>/dev/null
+jq '[.items[] | select(.type=="diagram" and .status=="pending")] | length' placeholders.json 2>/dev/null
 grep -rl "【此处插入.*图】" 响应文件/*.md 2>/dev/null
 ```
 
-- **有匹配文件** → 继续第 1 步
-- **无匹配文件或 `响应文件/` 不存在** → 停止，告知用户："未在 `响应文件/` 下找到图表占位符，图表渲染需要先由 `bid-tech-proposal`/`bid-commercial-proposal` 写好占位符及 Mermaid 代码块。是否现在运行对应 skill？"
+- **有 `placeholders.json` 且 diagram pending > 0** → 走 §1a 主路径（对照表查表）
+- **无 `placeholders.json` / diagram pending 为 0，但 legacy grep 有匹配文件** → 走 §1b legacy 兜底扫描
+- **两者皆无 / `响应文件/` 不存在** → 停止，告知用户："未找到图表占位符（对照表无 type=diagram 待处理项，正文也无 【此处插入XX图】），图表渲染需要先由 `bid-tech-proposal` 写好占位符（含 Mermaid 代码块）并登记进 placeholders.json。是否现在运行对应 skill？"
   - 用户同意 → 调用相应 skill 后继续
   - 用户不同意 → 暂停本次任务
 - **AUTO_MODE=true** 时：不可交互等待，直接在完成状态摘要中标注 `FAILED`，说明"未找到图表占位符"，交由 bid-manager 处理
@@ -81,13 +87,26 @@ grep -rl "【此处插入.*图】" 响应文件/*.md 2>/dev/null
   - `scripts/render.sh`（甘特图/ER 图路径）：命令前缀环境变量 `NO_WATERMARK=1`，例如 `NO_WATERMARK=1 bash scripts/render.sh input.mmd output.png`
 - **AUTO_MODE=true**（bid-manager 调度，无法交互）→ 默认**添加水印**（保持防滥用），并在完成状态摘要中注明
 
-### 1. 扫描占位符
+### 1. 确定待处理占位符（双路径）
 
-把扫描占位符改为**兜底正则**，识别同义变体：除了 `此处插入XX图`，也匹配 `此处展示/暂留/预留/添加/生成XX图`，以及外层加粗或省略动词的 `【XX图】`。对扫描到的全部图表占位符，无论用词，统一渲染替换；不要因用词不一致而跳过。
+> 本 skill 是**占位符对照表机制契约 v1** 中 `type:"diagram"` 的**替换方**（详见 `packages/bidsmart-skills/CLAUDE.md` "Placeholder registry" 段）。写入方是 `bid-tech-proposal` §4.2「图表生成规范」。**id 是唯一连接键，不做文字/前缀/label 猜测。**
+
+#### 1a. 主路径：对照表查表（新项目）
+
+读工作目录根的 `placeholders.json`，filter `type == "diagram" && status == "pending"`。对每个 item：
+
+- **用 item.id 在 item.source_file 里精确定位** `【此处插入:图表:<item.id>】`（正则 `【此处插入:图表:<id>】`，id 取 item.id 原值）；**不做文字/前缀/label 猜测，id 是唯一连接键**。
+- item.title 作为图表标题/上下文的参考（步骤 2 提取图表内容、步骤 5 替换为 `![<title>](...)` 时复用）。
+
+汇总得到待处理列表 `{id, source_file, title}`，进入步骤 2。处理完一个 item 后，回到本节对下一个 pending item 继续定位——**始终以表内 id 为准，不扫正文猜匹配**。
+
+#### 1b. legacy 兜底扫描（无 id 的旧占位符）
+
+`placeholders.json` 缺失、filter 后为空、或正文还残留无 id 旧占位符时启用。扫描 `响应文件/` 下所有 `.md` 文件，**兜底正则**识别同义变体：除了 `此处插入XX图`，也匹配 `此处展示/暂留/预留/添加/生成XX图`，以及外层加粗或省略动词的 `【XX图】`。对扫描到的全部图表占位符，无论用词，统一渲染替换；不要因用词不一致而跳过。**legacy 占位符不写回 placeholders.json。**
 
 每个占位符对应一张需要生成的图表。
 
-另：步骤 0 扫描后，用更宽松的 `【.*图】` 做一次对照，差集作为 **格式异常占位符** 列入完成状态块（必须可见，不得沉默跳过）。
+另：扫描后用更宽松的 `【.*图】` 做一次对照，差集作为 **格式异常占位符** 列入完成状态块（必须可见，不得沉默跳过）。
 
 ### 2. 提取图表内容
 
@@ -313,6 +332,15 @@ python3 scripts/watermark.py --auto-project-name diagram.png -o diagram.png
 
 将 markdown 中的占位符行替换为图片引用，**同时删除关联的源代码块（Mermaid 代码块或 ASCII 代码块，取决于步骤2走的是哪条路径）**：
 
+**对照表主路径（§1a）的替换目标与回填**：
+- 替换目标 = `【此处插入:图表:<item.id>】`（由 item.id 精确定位），替换为 `![<item.title 或 描述>](diagram-<item.id>.png)`。
+- 替换后**回填 placeholders.json**：该 item `status="done"`，`asset=<png 相对路径>`（相对工作目录根，如 `响应文件/diagram-sys-arch.png`）。按 id 幂等更新。
+- 渲染失败 / 占位符定位失败 → **保留占位符不动，item 维持 `pending`（不伪造 done、不回填 asset）**，供 bid-assembly 闭环标红。
+
+**legacy 兜底（§1b）的替换目标** = `【此处插入XX图】`（无 id），按下方"操作步骤"替换为 `![XX图](diagram-XX.png)`；**不写回 placeholders.json**。
+
+两种路径替换后，都要按下述规则删除关联源代码块。
+
 **替换前（方式A：Mermaid 代码块，主路径）：**
 ```
 【此处插入系统总体架构图】
@@ -353,14 +381,20 @@ graph TD
 - grep 统计以三反引号开头的 mermaid 代码围栏出现次数，总和必须为 0；
 - grep 统计未识别占位符（`展示/暂留/预留/添加/生成` + `图`，或加粗的 `图` 占位）出现次数，应为 0。
 
+> 上述三条硬 post-condition 顺带兜住图表占位符残留：未替换的 `【此处插入:图表:...】` 后面通常还跟着未删的 mermaid 代码围栏/`后续将自动渲染为`，会被前两条捕获。
+
+**对照表主路径自检（§1a，不伪造 done）**：所有 `type == "diagram"` 且已尝试处理的 item，检查其 `source_file` 中 `【此处插入:图表:...】` 残留：
+
+```bash
+grep -c '【此处插入:图表:' 响应文件/*.md
+```
+
+残留则对应 item **维持 `pending`**（不伪造 done、不回填 asset），供 bid-assembly 闭环标红——这与上方"硬 post-condition"不同，不直接把整阶段标 FAILED，而是把失败收敛到具体 item（与 `bid-poc-screenshots` §4 同语义）。
+
 ### 6. 图片文件命名
 
-统一命名格式：`diagram-{描述}.png`
-
-例：
-- `diagram-系统总体架构图.png`
-- `diagram-项目甘特图.png`
-- `diagram-故障处理流程图.png`
+- **对照表主路径（§1a）**：`diagram-<item.id>.png`（id 已唯一，省去描述归一化）。例：`diagram-sys-arch.png`、`diagram-role-perm.png`、`diagram-data-flow.png`。回填 placeholders.json 的 `asset` 取相对工作目录根的路径，如 `响应文件/diagram-sys-arch.png`。
+- **legacy 兜底（§1b）**：沿用 `diagram-{描述}.png`。例：`diagram-系统总体架构图.png`、`diagram-项目甘特图.png`、`diagram-故障处理流程图.png`。
 
 **archify 源文件保留**：archify 路径编写的 JSON IR 文件命名 `diagram-{描述}.{type}.json`（如 `diagram-系统总体架构图.architecture.json`），与 PNG 同目录（目标 md 所在的 `响应文件/`）。**渲染替换后保留不删**——它是可复用、可追溯的中间产物：渲染失败时修正 JSON 即可直接重渲、fresh session 断点续渲时可复用跳过编写步骤。`bid-md2doc` 只读 `.md`，JSON 不会被误纳入 Word 文档。
 
@@ -370,11 +404,16 @@ graph TD
 
 ### 断点续渲（fresh session 续做，不重复已完成的工作）
 
-标书图表多（常 20+ 张），渲染可能中途失败或会话中断。**再次调用本 skill（含 fresh session）时，必须先判断进度、精准续做，不从头重渲**：
+标书图表多（常 20+ 张），渲染可能中途失败或会话中断。**再次调用本 skill（含 fresh session）时，必须先判断进度、精准续做，不从头重渲**。主路径（§1a）的进度真相源是 `placeholders.json`：done 的 item 跳过、pending 的 item 续做；legacy 兜底（§1b）按下方 grep 判断。
 
-1. **扫描已完成项 → 跳过**：grep `响应文件/*.md` 中的 `![XX图](diagram-*.png)` 图片引用——这些占位符已渲染并替换完成，跳过不处理。
+1. **扫描已完成项 → 跳过**：
+   - 主路径：`placeholders.json` 中 `type=="diagram" && status=="done"` 的 item 已处理，跳过。
+   - legacy：grep `响应文件/*.md` 中的 `![XX图](diagram-*.png)` 图片引用——这些占位符已渲染并替换完成，跳过不处理。
 
-2. **扫描待处理项**：grep 还在的 `【此处插入.*图】` 占位符——这些需要处理（含从未处理 + 之前渲染失败的）。
+2. **扫描待处理项**：
+   - 主路径：`placeholders.json` 中 `type=="diagram" && status=="pending"` 的 item，用 item.id 在 item.source_file 定位 `【此处插入:图表:<id>】`。
+   - legacy：grep 还在的 `【此处插入.*图】`（无 id 旧占位符）——这些需要处理（含从未处理 + 之前渲染失败的）。
+   - 跨路径提醒：`【此处插入:图表:...】`（带 id）归主路径，`【此处插入XX图】`（无 id）归 legacy；两者都扫到时分别按各自路径处理，不要混。
 
 3. **对每个待处理占位符，按优先级检查中间产物可复用**：
    - 已有对应 `diagram-{描述}.png` 但占位符未替换（渲染成功、替换中断）→ 直接执行步骤 5 替换，不重新渲染
@@ -463,6 +502,9 @@ graph TD
   其中直接使用上游Mermaid代码: {N}
   其中由ASCII图转换: {N}
   其中使用archify渲染: {N}（按类型分：architecture {N} / workflow {N} / sequence {N} / dataflow {N} / lifecycle {N}）
+对照表统计（主路径 §1a）:
+  diagram pending 处理: {N}（done {N} / 仍 pending {N}，清单：{id + 原因}）
+  legacy 兜底替换（§1b）: {N}（无 id 旧占位符，不写回 placeholders.json）
 断点续渲统计（若为续做）:
   跳过（已完成）: {N}
   复用重渲（已有JSON/PNG）: {N}
