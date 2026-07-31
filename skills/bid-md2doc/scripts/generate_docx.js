@@ -256,7 +256,9 @@ function parseMdContent(filePath) {
 
   // 将 &nbsp; 独占一行（封面留白）转换为空段落标记，保留留白效果
   // 先把 &nbsp; 独占行标记为特殊占位，避免后续被清理掉
-  content = content.replace(/^\s*&nbsp;\s*$/gm, '%%BLANK_LINE%%');
+  // ⚠️ 不能用 \s*——\s 包含 \n，会吞掉换行把连续 &nbsp; 行合并成一行，
+  //    导致下方 %%BLANK_LINE%% 整行匹配失败、字面文本泄漏进 docx
+  content = content.replace(/^[ \t]*&nbsp;[ \t]*$/gm, '%%BLANK_LINE%%');
   // 其余 &nbsp;（行内出现的）替换为普通空格
   content = content
     .replace(/&nbsp;/g, ' ')
@@ -287,11 +289,15 @@ function parseMdContent(filePath) {
     }
 
     // 封面留白行（由 &nbsp; 转换而来）→ 生成空段落保留间距
-    if (line.trim() === '%%BLANK_LINE%%') {
-      elements.push(new Paragraph({
-        children: [],
-        spacing: BODY_LINE_SPACING,
-      }));
+    // 兼容多个标记粘连在同一行的情况（每个标记算一个空段落）
+    if (/^(%%BLANK_LINE%%[ \t]*)+$/.test(line.trim())) {
+      const count = (line.match(/%%BLANK_LINE%%/g) || []).length;
+      for (let k = 0; k < count; k++) {
+        elements.push(new Paragraph({
+          children: [],
+          spacing: BODY_LINE_SPACING,
+        }));
+      }
       i++;
       continue;
     }
