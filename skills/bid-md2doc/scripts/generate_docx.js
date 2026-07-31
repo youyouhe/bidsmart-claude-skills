@@ -102,8 +102,42 @@ function splitTableRow(line) {
   return inner.split('|').map(cell => cell.trim());
 }
 
-// 解析单元格内的粗体文本
-function parseCellContent(text) {
+// 解析单元格内容：支持 **粗体** 和 ![图片](路径)
+function parseCellContent(text, baseDir) {
+  // 图片语法（可能整格就是图片，或与文本混排）
+  const imgMatch = text.match(/^!\[(.*?)\]\((.*?)\)$/);
+  if (imgMatch) {
+    const imgPath = imgMatch[2];
+    const fullPath = path.isAbsolute(imgPath) ? imgPath : path.join(baseDir, imgPath);
+    try {
+      if (!fs.existsSync(fullPath)) {
+        console.warn(`表格图片不存在: ${fullPath}`);
+        return [new TextRun({ text: `[图片缺失: ${imgPath}]`, color: 'FF0000', size: BODY_FONT_SIZE })];
+      }
+      const imageData = fs.readFileSync(fullPath);
+      const ext = path.extname(fullPath).toLowerCase();
+      const validExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'];
+      if (!validExts.includes(ext)) {
+        console.log(`generate_docx: ⚠️ 表格中不支持的图片格式 ${ext || '(无扩展名)'}: ${imgPath}，以红色占位符替代`);
+        return [new TextRun({ text: `[图片格式不支持: ${imgPath}]`, color: 'FF0000', size: BODY_FONT_SIZE })];
+      }
+      const typeMap = { '.png': 'png', '.jpg': 'jpeg', '.jpeg': 'jpeg', '.gif': 'gif', '.bmp': 'bmp', '.webp': 'png' };
+      const maxCellWidth = 260; // 表格单元格内图片最大宽度（约7cm）
+      return [new ImageRun({
+        data: imageData,
+        type: typeMap[ext] || 'png',
+        transformation: {
+          width: maxCellWidth,
+          height: Math.floor(maxCellWidth * 0.75),
+        },
+      })];
+    } catch (error) {
+      console.error(`表格图片加载失败: ${fullPath}`, error.message);
+      return [new TextRun({ text: `[图片加载失败: ${imgPath}]`, color: 'FF0000', size: BODY_FONT_SIZE })];
+    }
+  }
+
+  // 纯文本（支持粗体）
   const parts = text.split(/(\*\*.*?\*\*)/);
   const children = parts
     .filter(part => part.length > 0)
@@ -117,7 +151,7 @@ function parseCellContent(text) {
 }
 
 // 解析Markdown表格
-function parseTable(lines, startIdx) {
+function parseTable(lines, startIdx, baseDir) {
   const tableLines = [];
   let idx = startIdx;
 
@@ -161,7 +195,7 @@ function parseTable(lines, startIdx) {
     new TableRow({
       children: headers.map(header =>
         new TableCell({
-          children: [new Paragraph({ children: parseCellContent(header), spacing: BODY_LINE_SPACING })],
+          children: [new Paragraph({ children: parseCellContent(header, baseDir), spacing: BODY_LINE_SPACING })],
           shading: { fill: 'E0E0E0' },
         })
       ),
@@ -171,7 +205,7 @@ function parseTable(lines, startIdx) {
       new TableRow({
         children: row.map(cell =>
           new TableCell({
-            children: [new Paragraph({ children: parseCellContent(cell), spacing: BODY_LINE_SPACING })],
+            children: [new Paragraph({ children: parseCellContent(cell, baseDir), spacing: BODY_LINE_SPACING })],
           })
         ),
       })
@@ -227,6 +261,19 @@ function parseImage(line, baseDir) {
       });
     }
 
+    // 根据扩展名映射 docx ImageRun 的 type（决定 media 文件名扩展名与 ContentType）。
+    // ⚠️ 必须传 type：docx 库用 `hash.${options.type}` 命名 media 文件，不传会生成
+    // `*.undefined` 扩展名，[Content_Types].xml 无对应声明 → Word 无法识别、图片不显示。
+    const typeMap = {
+      '.png': 'png',
+      '.jpg': 'jpeg',
+      '.jpeg': 'jpeg',
+      '.gif': 'gif',
+      '.bmp': 'bmp',
+      '.webp': 'png', // docx 库 ContentTypes 无 webp 声明；webp 降级用 png 类型名（当前项目无 webp 素材）
+    };
+    const imageType = typeMap[ext] || 'png';
+
     // 获取图片尺寸（简单处理，固定宽度）
     const maxWidth = 550; // 约15cm
 
@@ -234,6 +281,7 @@ function parseImage(line, baseDir) {
       children: [
         new ImageRun({
           data: imageData,
+          type: imageType,
           transformation: {
             width: maxWidth,
             height: Math.floor(maxWidth * 0.75), // 假设4:3比例
@@ -343,7 +391,7 @@ function parseMdContent(filePath) {
 
     // 表格
     if (line.includes('|')) {
-      const { table, nextIdx } = parseTable(lines, i);
+      const { table, nextIdx } = parseTable(lines, i, baseDir);
       if (table) {
         elements.push(table);
         elements.push(new Paragraph({ text: '' })); // 表格后空行
@@ -580,6 +628,8 @@ async function generateDocx() {
   const outputPath = path.isAbsolute(CONFIG.outputFile)
     ? CONFIG.outputFile
     : path.join(CONFIG.inputDir, CONFIG.outputFile);
+  // 确保输出目录存在（输出到独立 输出/ 目录时，需先建目录，否则 writeFileSync 报 ENOENT）
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   const buffer = await Packer.toBuffer(doc);
   fs.writeFileSync(outputPath, buffer);
 
