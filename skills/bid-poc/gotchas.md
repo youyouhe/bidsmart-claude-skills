@@ -4,6 +4,16 @@
 
 ## Gotchas
 
+### Chart.js 裸 canvas 导致页面无限拉高
+
+**问题**：`<canvas height="200">` 直接放在卡片 div 里（无固定高度容器），配 `responsive: true, maintainAspectRatio: false`，预览时图表每帧长高一点，下方控件逐步下移、整个页面逐渐拉高（已用无头 Chrome 复现：8 秒内 canvas 从 200px 长到 948px）。
+
+**解决**：每个 canvas 必须包在显式固定高度容器里：`<div class="relative h-64"><canvas ...></canvas></div>`。canvas 的 `height` 属性会被 Chart.js 内联 style 覆盖，不能当约束用。详见 SKILL.md 1.3 Chart.js 硬约束。
+
+*（来自 2026-07 POC 预览页面拉高 bug 排查，注入时间：2026-07-30）*
+
+---
+
 ### 系统清单/编号取自 _metadata.md（镜像自 system_decomposition.json）
 
 **问题**：POC 子目录命名（`poc/S04-XX/`）曾与 tech-proposal 占位符里的系统编号对不上，因为两套坐标系各自划分。

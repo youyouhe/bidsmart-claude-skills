@@ -1,10 +1,10 @@
 ---
 name: bid-poc
 description: >
-  基于需求规格书自动生成每个系统的 POC 前端原型。不属于 web-builder 交互式流程，
-  而是 bid-manager pipeline 的专用 AUTO_MODE skill——从需求文档直接生成完整
-  HTML/CSS/JS 原型，无需用户输入。逐系统处理，产出到 poc/{SXX}-{Name}/ 目录。
-  当用户要求"自动生成POC"、"批量生成原型"时触发；由 bid-manager S8 自动调用。
+  基于需求规格书自动生成每个系统的系统原型前端页面（内部代号 POC，产出到 poc/ 目录）。
+  不属于 web-builder 交互式流程，而是 bid-manager pipeline 的专用 AUTO_MODE skill——
+  从需求文档直接生成完整 HTML/CSS/JS 原型，无需用户输入。逐系统处理，产出到 poc/{SXX}-{Name}/ 目录。
+  当用户要求"自动生成POC"、"自动生成原型"、"批量生成原型"时触发；由 bid-manager S8 自动调用。
   前置条件：bid-requirements 已完成，项目文档/01-需求分析/ 下有系统需求文档。
 tools: [read, write, bash]
 ---
@@ -101,6 +101,12 @@ read 项目文档/01-需求分析/{SXX}-{Name}.md
    - 搜索过滤
    - 模拟实时数据更新
 
+   **Chart.js 硬约束（违反会导致预览页面无限拉高）**：每个 `<canvas>` 必须包在**显式固定高度的容器**里：
+   ```html
+   <div class="relative h-64"><canvas id="trendChart"></canvas></div>
+   ```
+   禁止把 `<canvas>` 直接放进卡片 div、禁止用 `height="200"` 属性代替容器。原因：`responsive: true, maintainAspectRatio: false` 时 Chart.js 会把 canvas 高度撑到父容器高度；父容器高度若由 canvas 内容决定，resize 检测会形成正反馈——canvas 每帧长高一点，下方控件逐步下移、整个页面逐渐拉高。`height` 属性会被 Chart.js 的内联 style 覆盖，不起约束作用。
+
 4. **`.manifest.json`**（最后写）— **功能点-Tab 映射契约**，供下游 `bid-poc-screenshots` 精确截图：
 
    ```json
@@ -148,6 +154,7 @@ read poc/{SXX}-{Name}/index.html
 - 引用的 `style.css` 和 `script.js` 已生成
 - 没有 `[TODO]`、`[PLACEHOLDER]`、`[待实现]` 残留
 - 所有 P1 功能点有对应的 UI 区域
+- 每个 `<canvas>` 都有固定高度容器包裹（见 1.3 Chart.js 硬约束）
 
 如果检查不通过，修复后重新写入。
 
@@ -194,6 +201,10 @@ AUTO_MODE 下使用统一的设计参数：
 - 卡片标题使用功能点名称（与需求规格一致）
 - 在卡片右上角用小字标注 `S04-001` 功能编号
 - P2 功能可合并到次要区域或折叠面板
+
+### 页面措辞（截图会进标书，评委可见）
+
+生成页面的 `<title>`、页头标题、角落标注中**禁止出现 "POC"、"Demo"、"概念验证" 字样**——这些页面截图会直接插入标书正文。页面自称用系统名称即可（如"S04 性能预报系统"），需要强调性质时用"系统原型"。
 
 ### 数据模拟
 

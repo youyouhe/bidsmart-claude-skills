@@ -127,7 +127,7 @@ EOF
 
 #### 2.5 册别结构一致性（多册项目）
 
-如分析报告指定了多册结构：
+如分析报告 `输出模式: 多册`（或其 `投标文件组成` 节顶层 `###` 分册 ≥ 2）：
 - 检查每册对应的 `.md` 文件是否存在（如第一册应有 `00-资格证明文件.md`）
 - 检查每册文件中包含的附件是否与分析报告中该册的附件清单一致
 - 检查是否有附件被错误地放入了不属于它的册中（如资格声明放入了商务技术册）
@@ -269,30 +269,12 @@ grep -cP '[┌┐└┘├┤┬┴┼═║╔╗╚╝]|[─━]{2,}|[─━].
 
 ##### 5.5.1 检查 DocScan 可用性
 
-先解析 DocScan 地址（Web 会话由平台注入 `DOCSCAN_URL`；CLI/插件从平台同步到磁盘的 `services.env` 加载）：
+🔒 DocScan 密钥/地址由平台服务端持有（`docscan` 工具内置），agent 无需也不应接触 `${DOCSCAN_API_KEY}`/`${DOCSCAN_URL}`（沙箱 env 已无密钥）。直接探活：
 
-```bash
-# ── DocScan 配置引导（Web 内嵌 / CLI 插件 通用；每次用 DocScan 前执行一次）──────
-# 消除 ${DOCSCAN_URL} 为空时静默回退 localhost:8800 导致的「DocScan 离线」误判。
-# Web：DOCSCAN_URL 已由平台注入（沙箱继承）→ 跳过文件加载，env 为权威（避免磁盘旧值覆盖）。
-# CLI：$DOCSCAN_URL 为空 → 从平台同步到磁盘的 services.env 加载（DB 权威源；API 启动与设置变更时刷新）。
-if [ -z "${DOCSCAN_URL:-}" ]; then
-  for _f in "${DOCSCAN_CONFIG_FILE:-}" \
-            "${SMARTBID_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/smartbid}/services.env" \
-            "${XDG_CONFIG_HOME:-$HOME/.config}/smartbid/services.env"; do
-    [ -n "$_f" ] && [ -f "$_f" ] && [ -r "$_f" ] && { set -a; . "$_f"; set +a; break; }
-  done
-  unset _f
-fi
-: "${DOCSCAN_URL:=http://localhost:8800}"   # 仍未配置则保留本地默认；离线由可用性检测兜底
-```
+调用 `docscan(operation: "health")` 返回在线状态。
 
-```bash
-curl -s -o /dev/null -w "%{http_code}" -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/health"
-```
-
-- **返回 200** → 继续 5.5.2
-- **连接失败/超时** → 跳过整个 5.5 节，在完成状态中标注"DocScan 预检跳过"
+- **在线** → 继续 5.5.2
+- **离线/超时** → 跳过整个 5.5 节，在完成状态中标注"DocScan 预检跳过"
 
 ##### 5.5.2 生成预检 docx
 
@@ -301,16 +283,13 @@ curl -s -o /dev/null -w "%{http_code}" -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${D
 ```bash
 # 拼接所有响应文件（按序号排序，排除内部文件和 S8 自身产出）
 cat $(ls 响应文件/[0-9]*.md | grep -v '00-目录\|核对报告\|装订指南\|crossref_mapping\|扫描件\|Word文档待完善\|信息填写进度\|资料检索') > /tmp/assembly_preflight.md
-# 上传到 DocScan
-FID=$(curl -s -X POST -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/md2docx" \
-  -F "file=@/tmp/assembly_preflight.md" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
 ```
+
+再调用 `docscan(operation: "md2docx", filePath: "/tmp/assembly_preflight.md")` → 返回 `fid`。
 
 ##### 5.5.3 格式预检
 
-```bash
-curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/$FID/preview"
-```
+调用 `docscan(operation: "preview", fid: "<fid>")` → 返回段落结构，用于格式/结构检查。
 
 DocScan 预检发现的问题按以下标准分级写入核对报告：
 
@@ -329,9 +308,7 @@ DocScan 预检发现的问题按以下标准分级写入核对报告：
 
 ##### 5.5.4 占位符精确审计（OOXML 级别）
 
-```bash
-curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/$FID/placeholders"
-```
+调用 `docscan(operation: "placeholders", fid: "<fid>")` → 返回 OOXML 级占位符清单。
 
 将 DocScan 返回的占位符清单与步骤 5.3（markdown grep）的结果对比：
 
@@ -611,7 +588,7 @@ SCRIPTS=/mnt/oldroot/home/bird/xyy/smartbid-platform/packages/bidsmart-skills/sk
 | `normalize_markdown.py` | MD 文件规范化（BOM/换行/缩进） | `python3 $SCRIPTS/normalize_markdown.py "{workDir}/响应文件"` |
 | `validate_structure.py` | MD 结构验证（标题层级/表格） | `python3 $SCRIPTS/validate_structure.py "{workDir}/响应文件"` |
 | `detect_placeholders.py` | 占位符检测 | `python3 $SCRIPTS/detect_placeholders.py "{workDir}/响应文件" 核对报告.md 装订指南.md` |
-| `verify_docx.py` | Word 文档后验证 | `python3 $SCRIPTS/verify_docx.py "{workDir}/响应文件/output.docx"` |
+| `verify_docx.py` | Word 文档后验证 | `python3 $SCRIPTS/verify_docx.py "{workDir}/输出/output.docx"` |
 | `enhanced_assembly.py` | 一键运行全部检查 | `python3 $SCRIPTS/enhanced_assembly.py "{workDir}"` |
 
 **使用建议**：

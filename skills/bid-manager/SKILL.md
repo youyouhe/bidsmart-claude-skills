@@ -3,7 +3,7 @@ name: bid-manager
 description: >
   投标全流程管理器。编排所有 bid skills 按流水线自动执行，支持一键投标、
   断点续跑、指定阶段启动。15个阶段：分析→核实→系统分解→信息收集→商务标→
-  技术标→需求规格→POC→图表→POC截图→扫描件→质检→自动修复→生成Word。
+  技术标→需求规格→原型生成→图表→原型截图→扫描件→质检→自动修复→生成Word。
   当用户要求一键投标、全流程投标、管理投标进度、继续投标流程时触发。
   前置条件：需要有招标/磋商/采购文件。
 ---
@@ -20,7 +20,7 @@ description: >
 
 ```
 S0:前置检查 → S1:分析 → S2:核实 → S3:系统分解 → S4:信息收集 → S5:商务标 → S6:技术标
-→ S7:需求规格 → S8:POC实现 → S9:图表 → S10:POC截图 → S11:扫描件
+→ S7:需求规格 → S8:原型生成 → S9:图表 → S10:原型截图 → S11:扫描件
 → S12:质检 → S13:自动修复 → S14:生成Word
 ```
 
@@ -29,14 +29,14 @@ S0:前置检查 → S1:分析 → S2:核实 → S3:系统分解 → S4:信息收
 | S0 | 前置检查 | （无 skill，调用平台健康检查接口） | 确认 DocScan / LLM Key 等依赖服务可用 | 仅 not_ready 时 |
 | S1 | 分析 | bid-analysis | 分析招标文件，生成 `分析报告.md` | 否 |
 | S2 | 核实 | bid-verification | 核实分析报告，自动修正错误 | 否 |
-| S3 | 系统分解 | bid-system-decomp | 产出 `system_decomposition.json`（系统分解单一事实源，技术标/需求规格/POC 共享） | 否 |
+| S3 | 系统分解 | bid-system-decomp | 产出 `system_decomposition.json`（系统分解单一事实源，技术标/需求规格/原型生成共享） | 否 |
 | S4 | 信息收集 | （人工交互） | 收集公司信息、报价决策 | **是** |
 | S5 | 商务标 | bid-commercial-proposal | 编写商务标全部附件 | 否（自动模式） |
 | S6 | 技术标 | bid-tech-proposal | 编写技术标全部文件 | 否（自动模式） |
 | S7 | 需求规格 | bid-requirements | 编写需求规格书（仅软件项目） | 否（自动模式） |
-| S8 | POC实现 | bid-poc | 基于需求规格自动生成POC原型（仅软件项目） | 否（自动模式） |
+| S8 | 原型生成 | bid-poc | 基于需求规格自动生成系统原型页面（仅软件项目） | 否（自动模式） |
 | S9 | 图表 | bid-mermaid-diagrams | 生成并替换图表占位符 | 否 |
-| S10 | POC截图 | bid-poc-screenshots | 截取POC页面并替换功能截图占位符 | 否 |
+| S10 | 原型截图 | bid-poc-screenshots | 截取系统原型页面并替换功能截图占位符 | 否 |
 | S11 | 扫描件 | bid-material-search | 批量替换扫描件占位符 | 否 |
 | S12 | 质检 | bid-assembly | 全面质检，生成核对报告 | 否 |
 | S13 | 自动修复 | bid-tech/commercial-proposal | 根据质检结果分派修复 | 否 |
@@ -111,7 +111,7 @@ S0:前置检查 → S1:分析 → S2:核实 → S3:系统分解 → S4:信息收
 每个阶段在 SKILL.md 里都声明了自己的 `输出`（如 S1→`分析报告.md`、S3→`system_decomposition.json`、S6→技术标 .md、S10→`poc-*.png`）。**这是契约，不是装饰**。子 skill 返回 `状态: SUCCESS` 后，**先回验产物再标 ✅**：
 
 1. 用 `ls` / `wc -c` 抽查该阶段声明的 `output` 是否真实存在且非空（空文件 = 未产出）。
-2. **产物缺失或为空 → 该阶段记 `failed` 并写明原因，绝不标 ✅**，按"错误处理"停止或降级，向用户如实说明（例："S10 POC截图 标记成功，但 `响应文件/poc-*.png` 为 0 张——浏览器运行时不可用，截图未生成，已改为 failed"）。
+2. **产物缺失或为空 → 该阶段记 `failed` 并写明原因，绝不标 ✅**，按"错误处理"停止或降级，向用户如实说明（例："S10 原型截图 标记成功，但 `响应文件/poc-*.png` 为 0 张——浏览器运行时不可用，截图未生成，已改为 failed"）。
 3. S14 生成 Word 前的最终门禁：确认 S6 技术标核心文件、S10 截图（软件项目时）确实落盘；缺则先回退修复，不要带着空证据生成 Word。
 4. 最终汇总的"完成度"= 已回验产出数 / 应产出数，不是子 skill 的自报 SUCCESS 数。FAILED 阶段在汇总里用 ❌ 标红，不得用 ✅ 掩盖。
 
@@ -216,7 +216,7 @@ date +%Y    # 取系统当前年份
 ```
 
 - 在上下文中设置 `AUTO_MODE=true`
-- 执行 bid-system-decomp：从分析报告"技术需求"聚类系统，产出 `system_decomposition.json`（全流水线系统分解单一事实源；技术标/需求规格/POC 共享，禁止下游各自重划系统编号）
+- 执行 bid-system-decomp：从分析报告"技术需求"聚类系统，产出 `system_decomposition.json`（全流水线系统分解单一事实源；技术标/需求规格/原型生成共享，禁止下游各自重划系统编号）
 - **非软件项目**（json 的 `has_system_structure: false`）：本阶段仍标 SUCCESS，json 为 `systems: []`；下游 S7/S8/S10 据此自动跳过
 - 解析完成状态块的 `系统数 / 功能点 / ▲ / ★` 计数，写入 `pipeline_progress.json`（供 S12 质检比对、完成度门禁验证）
 
@@ -321,7 +321,7 @@ date +%Y    # 取系统当前年份
 - 每 3 个系统汇报一次进度
 - 完成后更新 `pipeline_progress.json`
 
-### S8: POC实现（仅软件项目）
+### S8: 原型生成（仅软件项目）
 
 ```
 输入: 项目文档/01-需求分析/_metadata.md + {SXX}-{Name}.md
@@ -330,8 +330,8 @@ date +%Y    # 取系统当前年份
 ```
 
 - 仅在 S7 完成后执行
-- 从 metadata 提取需要 POC 的系统（原型分类含数据录入/统计报表/管理配置/流程审批/移动端）
-- 逐个系统自动生成 HTML/CSS/JS POC 原型
+- 从 metadata 提取需要生成原型的系统（原型分类含数据录入/统计报表/管理配置/流程审批/移动端）
+- 逐个系统自动生成 HTML/CSS/JS 系统原型页面
 - 集成类/文书类系统自动跳过
 - 完成后更新 `pipeline_progress.json`
 
@@ -347,19 +347,19 @@ date +%Y    # 取系统当前年份
 - 逐个生成 Mermaid 图并渲染为 PNG
 - 替换占位符为图片引用
 
-### S10: POC截图
+### S10: 原型截图
 
 ```
 输入: poc/*/index.html + 响应文件/*.md（含功能截图占位符）
 输出: 响应文件/poc-*.png + 更新后的 .md 文件
 调用: bid-poc-screenshots
-前置: 需要 POC 已生成（<workDir>/poc/ 下有子目录）
+前置: 需要系统原型已生成（<workDir>/poc/ 下有子目录）
 ```
 
-- 如果 POC 目录不存在或为空，跳过此阶段
+- 如果 poc/ 目录不存在或为空，跳过此阶段
 - 扫描所有技术文件中的 `【此处插入XX功能截图】` 占位符
-- 调用 screenshot-poc.js 截取 POC 页面为 PNG
-- 将占位符替换为 Markdown 图片引用 `![XX POC](poc-XX.png)`
+- 调用 screenshot-poc.js 截取系统原型页面为 PNG
+- 将占位符替换为 Markdown 图片引用 `![XX 系统原型](poc-XX.png)`
 
 ### S11: 扫描件
 

@@ -1,14 +1,14 @@
 ---
 name: bid-poc-screenshots
 description: >
-  将 POC 原型页面截取为 PNG 截图，并按 placeholders.json 对照表替换技术标书中的【此处插入:截图:<id>】占位符。
+  将系统原型页面（poc/ 目录）截取为 PNG 截图，并按 placeholders.json 对照表替换技术标书中的【此处插入:截图:<id>】占位符。
   纯机械步骤，无 LLM 推理。id 查表精确定位，不做文字/前缀/label 猜测（对照表机制见 packages/bidsmart-skills/CLAUDE.md "Placeholder registry" 段）。
-  当用户要求"插入POC截图"、"替换功能截图占位符"、"poc截图"时触发。
-  前置条件：响应文件/ 目录下已存在技术标书 .md 文件，工作目录根有 placeholders.json，且 POC 已生成（workDir/poc/ 下有子目录）。
+  当用户要求"插入原型截图"、"替换功能截图占位符"、"poc截图"时触发。
+  前置条件：响应文件/ 目录下已存在技术标书 .md 文件，工作目录根有 placeholders.json，且系统原型已生成（workDir/poc/ 下有子目录）。
 tools: [read, write, bash, poc_screenshot]
 ---
 
-# POC 截图占位符替换
+# 系统原型截图占位符替换
 
 ## 工作模式
 
@@ -81,9 +81,26 @@ screenshots-map.json 示例：
 ![<item.label 或 系统名 - 功能点>](<file>)
 ```
 
-label 优先取 item.label；缺失时取 `system_decomposition.json` 里该功能点的 name。
+label 优先取 item.label；缺失时取 `system_decomposition.json` 里该功能点的 name。**label/图注中禁止出现 "POC"、"概念验证"、"Demo" 字样**——这些文字会进入标书正文，评委可见，一律用"系统原型"口径（与 bid-tech-proposal §4.2.1 措辞规则一致）。
 
 **(d) 回填 placeholders.json**：该 item `status="done"`，`asset=<file 相对路径>`（相对工作目录根，如 `响应文件/poc-S04-性能预报系统-实时预报.png`）。按 id 幂等更新。
+
+### 2.5 孤儿截图兜底插入（确保每张 POC 截图都进标书）
+
+§2 只替换**已登记占位符**的截图。常见缺陷：上游 `bid-tech-proposal` 漏给某些系统/功能点建截图占位符，但 `bid-poc` 仍生成了对应原型视图 → 这些**孤儿截图**若无兜底会全部丢失（标书缺图）。本步强制让每张捕获的截图都落到正文。
+
+读 `响应文件/screenshots-map.json`，**展开**其 `screenshots[].screenshots[]` 全部视图（含 `functionPointId` 与 `file`），与 placeholders.json 的 screenshot item.id 集合比对：
+
+1. **识别孤儿**：视图的 `functionPointId` ∉ 任何 screenshot item.id；以及 `functionPointId=null` 的"默认视图"（文件名形如 `poc-<系统>.png`）。
+2. **逐张补插**（纯机械，不写论述文字）：
+   - **定位系统**：由 `functionPointId` 前缀（`S01-005`→`S01`）或文件名（`poc-S01-…`→`S01`）。
+   - **定位小节**：在技术方案文件中（通常 `响应文件/05-总体技术方案.md`；找不到则 `grep -rl <系统名> 响应文件/*.md`）找到该系统的小节标题（`##`/`###` 含系统编号 S01 或系统名）。
+   - **插入点**：优先该功能点小节末尾（`#### S01-005 …` 之后、下一个 `####`/`###` 之前）；功能点小节不存在则插到系统小节末尾。
+   - **插入内容**：一行 `![系统原型 - <功能点名|系统名>](<file>)`（**裸文件名，不加 `响应文件/` 前缀**——md 文件与截图同在 `响应文件/` 下，generate_docx.js 的 baseDir 已是该目录，加前缀会变成 `响应文件/响应文件/...` 导致 Word 找不到图）。措辞用"系统原型"，**禁 POC/概念验证/Demo**。
+3. **默认视图去重**：同一系统只要已有任意截图落位，其 `functionPointId=null` 默认视图**不再补插**；仅当某系统**零张落位**时，用默认视图兜底插一张，确保每个有 POC 的系统至少出现一张原型截图。
+4. **回填对照表**：每张补插的截图向 placeholders.json 幂等 upsert screenshot item（`id` = functionPointId 或 `<系统编号>-prototype`、`type=screenshot`、`status=done`、`asset=响应文件/<file>`），使 bid-assembly 闭环校验通过。
+
+> 本步是"截图不进 Word"的最终兜底：即使上游占位符缺失/命名不一致，只要生成了原型视图，就保证它进入标书。
 
 ### 3. legacy 兜底扫描（无 id 的旧占位符）
 
@@ -111,7 +128,8 @@ source_file 中**不得残留** `【此处插入:截图:...】`；残留则对�
 --- BID-POC-SCREENSHOTS COMPLETE ---
 状态: SUCCESS | SKIPPED | FAILED
 截图总数: N
-替换成功: M
+替换成功(id 匹配): M
+补插孤儿截图(§2.5 兜底): K2
 未匹配占位符(仍 pending): K
 截图清单:
   - poc-S04-性能预报系统.png (462 KB)

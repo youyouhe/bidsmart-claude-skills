@@ -44,11 +44,14 @@ python .claude/skills/bid-analysis/scripts/extract_pdf_toc.py <pdf路径> --page
 - 如 `has_embedded_toc=true`，使用 `page_sections` 进行定向章节读取
 - 如检测到 `toc_pages`，读取 `toc_page_text` 自行分析 TOC 结构
 
-#### 0.3 OCR（可选，仅扫描件）
-如 `is_scanned=true` 且 OCR_SERVICE_URL 已配置：
-```bash
-python .claude/skills/bid-analysis/scripts/ocr_pages.py <pdf路径> --pages 1-N --output <工作目录>/pdf_ocr.json
-```
+#### 0.3 扫描件/图片型文件处理（提醒用户，不自动 OCR）
+
+`parse_pdf.py` 会输出 `is_scanned`（首页文字 <50 字 → 判为扫描件）。**当前策略：正规招标/采购文件截至当前均为数字版（Word/PDF/Excel），扫描件/图片型属异常情况。** 检测到 `is_scanned=true`（PDF）或 docx 正文极少却含内嵌图（`word/media/*`）时，**不要自动 OCR**，而是：
+1. 在分析报告/进度中标注该文件为「扫描件/图片型」，列出文件名；
+2. 向用户提醒：该文件无法直接提取，请确认是否为有效招标文件，或提供数字版；
+3. 暂停该文件的自动解析，等待用户确认后再决定。
+
+不调用 `ocr_pages.py`（需 `OCR_SERVICE_URL`，本部署未配置；且非默认流程）。如确需 OCR，由用户明确要求后再单独处理。
 
 #### 0.4 解析 Excel 附件（多文件场景）
 如工作目录包含 Excel 文件（技术规范表、报价清单、参数对比表等），先解析为结构化数据：
@@ -99,55 +102,48 @@ python .claude/skills/bid-analysis/scripts/parse_excel.py <excel路径> --output
 - 格式文件夹内的模板文件提取列结构，归入格式文件清单
 - 所有内容汇总到统一的分析报告中
 
-#### 1.2 Word 文件读取方法
+#### 1.2 Word 文件读取方法（按表格有无分流）
 
-**方式 A（优先）：DocScan 转换服务**
+**先分流，再读取**——不是每个 docx 都该走 DocScan。DocScan 是保版式的 docx→PDF→Markdown 转换器，价值在忠实还原**表格列结构/合并单元格**；对没有表格的 docx，它的输出和 python-docx 完全一样，却慢得多（每次转换 = ONLYOFFICE 子进程 + HTTP，并发受限会限流）。因此按 docx **有没有表格**决定走哪条路。
 
-地址解析：Web 会话由平台注入 `DOCSCAN_URL`；CLI/插件会话从平台同步到磁盘的 `services.env`（DB 权威）加载。下方引导块统一两种上下文，未配置时回退 `http://localhost:8800`。远程/带鉴权部署时平台会注入 `DOCSCAN_API_KEY`，所有 DocScan 调用都带上 `-H "X-API-Key: ${DOCSCAN_API_KEY:-}"`：
+先用 python-docx 本地快速探一次结构（毫秒级，仅用于分流，不计入正式抽取）：
 
-```bash
-# ── DocScan 配置引导（Web 内嵌 / CLI 插件 通用；每次用 DocScan 前执行一次）──────
-# 消除 ${DOCSCAN_URL} 为空时静默回退 localhost:8800 导致的「DocScan 离线」误判。
-# Web：DOCSCAN_URL 已由平台注入（沙箱继承）→ 跳过文件加载，env 为权威（避免磁盘旧值覆盖）。
-# CLI：$DOCSCAN_URL 为空 → 从平台同步到磁盘的 services.env 加载（DB 权威源；API 启动与设置变更时刷新）。
-if [ -z "${DOCSCAN_URL:-}" ]; then
-  for _f in "${DOCSCAN_CONFIG_FILE:-}" \
-            "${SMARTBID_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/smartbid}/services.env" \
-            "${XDG_CONFIG_HOME:-$HOME/.config}/smartbid/services.env"; do
-    [ -n "$_f" ] && [ -f "$_f" ] && [ -r "$_f" ] && { set -a; . "$_f"; set +a; break; }
-  done
-  unset _f
-fi
-: "${DOCSCAN_URL:=http://localhost:8800}"   # 仍未配置则保留本地默认；离线由可用性检测兜底
+```python
+from docx import Document
+import zipfile
+doc = Document('文件路径.docx')
+has_tables = len(doc.tables) > 0
+has_images = any(n.startswith('word/media/') for n in zipfile.ZipFile('文件路径.docx').namelist())
 ```
 
-先检查服务是否在线：
-```bash
-curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/health"
-```
+| docx 情况 | 路由 | 原因 |
+|---|---|---|
+| 有表格 | **方式 A：DocScan**（下方 `docscan` 工具） | 忠实还原表格列结构/合并单元格 |
+| 无表格、有正文 | **方式 B：python-docx** | 本地即时，结果与 DocScan 相同 |
+| 无表格、无图、仅标题/占位符 | **方式 B：python-docx**，记为"封面模板（投标人自填，无可提取正文）" | 这是**空模板**，不是图片型，**不要**丢去 DocScan/多模态空转 |
+| 有内嵌图（word/media/*）且正文极少 | **图片型/扫描件** → 提醒用户（见末尾「docx 提取异常处理」） | DocScan 无 OCR，转出来也是空 |
 
-若返回正常（HTTP 200），使用服务转换：
-```bash
-# 上传 .docx，获取 fid（返回 JSON 字符串，如 "abc123"）
-FID=$(curl -s -X POST -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/convert" \
-  -F "file=@文件路径.docx" | python -c "import sys,json; print(json.load(sys.stdin))")
+> ⚠️ **判据永远是 `word/media/*` 有没有内嵌图 + `doc.tables` 有没有表，不是"python-docx 抽取字数少不少"。** 空模板抽取字数也少，但它是空模板、不是图片——按字数判断会把空模板误判成图片型（历史 bug，已修正）。
 
-# 获取全部页面的 Markdown（含文本和表格），同时保存到本地以备核实
-curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/md/$FID" | tee docscan_output.md
-```
+**方式 A（docx 有表格时）：DocScan 转换服务**
+
+通过平台提供的 `docscan` 工具调用 DocScan。🔒 密钥与地址由平台服务端持有，agent **无需也不应接触任何 key/地址**——不要用 `curl` 或 `${DOCSCAN_API_KEY}`（沙箱 env 已无密钥）。流程：
+
+1. `docscan(operation: "health")` → 探活；在线则继续。
+2. `docscan(operation: "convert", filePath: "<招标 .docx 的绝对路径>")` → 返回 `fid`。
+3. `docscan(operation: "get_md", fid: "<上一步 fid>", outputPath: "<工作目录>/docscan_output.md")` → 全量 Markdown（含文本与表格）落盘，再 `read` 该文件作为分析输入。
 
 服务返回的 Markdown 已包含文档的段落和表格（表格基于版式检测，渲染为 `|` 分隔的 Markdown 表格），直接作为分析输入使用。**极少数复杂排版**（如单元格内嵌套小表格、无边框纯空格对齐的伪表格）可能未被正确识别为表格——如某处应为表格的内容在 Markdown 中呈现为一段不规则纯文本，且恰好包含关键数据（金额、分值、分值明细），须结合原 Word/PDF 交叉核对，不可直接采信可能已错位的文本。
 
-**默认地址检测失败时：先询问用户，不要静默回退**
+**DocScan 不可用时：先询问用户，不要静默回退**
 
-若 `curl` 无响应、超时或返回非 200，**不要直接跳到方式 B**，先向用户提问：
+若 `health` 失败、超时或返回离线，**不要直接跳到方式 B**，先向用户提问：
 
-> DocScan 服务在当前地址（`$DOCSCAN_URL`，未设置时 `http://localhost:8800`）未检测到。是否使用其他地址？请提供实际 URL；如果没有可用的 DocScan 服务，回复"本地提取"将使用 python-docx 直接解析。
+> DocScan 服务当前不可用。是否使用其他地址？请让管理员在「系统设置 → DocScan」更新；如果没有可用的 DocScan 服务，回复"本地提取"将使用 python-docx 直接解析。
 
-- 用户提供了新 URL → 在本次会话内 `export DOCSCAN_URL=<用户提供的 URL>`（同样会自动带上 `DOCSCAN_API_KEY` 鉴权头），随后重新执行 `/api/health` 检查，成功则后续 `/api/convert`、`/api/md/{fid}` 请求都用该地址（本次分析范围内有效，不写回配置文件）
-- 用户选择本地提取 → 转到方式 B
+- 用户要求本地提取，或确认没有可用 DocScan → 转到方式 B
 
-**方式 B（用户选择本地提取，或明确没有可用 DocScan 服务时）：python-docx**
+**方式 B（docx 无表格时；或用户选择本地提取 / DocScan 不可用时的兜底）：python-docx**
 
 ```python
 from docx import Document
@@ -166,15 +162,17 @@ for table in doc.tables:
 
 **关键原则：无论使用哪种方式，表格必须完整提取，不可跳过或概括。**
 
+**空封面模板识别（重要，避免历史 bug）**：若 python-docx 抽出来只有一个标题/占位符（如"技术力量1""业绩""营业执照"），且该 docx **没有内嵌图**（`word/media/*` 为空）、**没有表格**——这是招标方提供的**空封面模板**（投标人自行附证明材料），不是"图片型 docx"。直接在格式文件清单里记该行为"封面模板（投标人自填，无可提取正文）"，**不要**去跑 DocScan、不要去多模态 Read、不要去"导出图片内容"——里面本就没有内容。
+
 #### 1.3 PDF 文件读取方法
 
 - **预处理完成时**（步骤 0 已生成 `pdf_pages.json` 和 `pdf_toc.json`）：
   - 按 TOC 的 `page_sections` 定位章节 `start_page`/`end_page`
   - 从 `pdf_pages.json` 的 `pages` 数组中读取目标页范围的文本
   - 表格已有 `[TABLE]...[/TABLE]` Markdown 标记，无需额外处理
-  - 如有 OCR 结果（`pdf_ocr.json`），用 OCR 文本替换对应页的空白文本
+  - 如 `is_scanned=true`：该 PDF 为扫描件 → 按 §0.3 提醒用户，不自动解析
 - **预处理未完成/失败时**：回退原方案 — 使用 Read tool 读取 PDF，每次 15-20 页，分批覆盖全部内容
-- PDF 图片的 OCR 精度有限，**数字、金额、分值等关键数据必须反复确认**
+- 表单类 PDF 常有重叠文字层（如"开开标标"双字渲染），**数字、金额、分值等关键数据须交叉核对**
 
 #### 1.4 Excel 文件读取方法
 
@@ -570,9 +568,13 @@ for table in doc.tables:
 
 ### 格式文件清单闭环核对（必做，失败=任务失败）：写完清单后必须执行——格式文件夹 ls 计数(docx+pdf+xlsx) 必须等于 清单表行数；不等则回到本节补全，不得填写完成摘要。
 
-### 图片型/空提取 docx 处理（禁止静默跳过）：若某 docx 的 extracted.txt 字节数小于 50 或仅一个词（如 业绩/信誉），说明是图片型/复杂版式 docx，python-docx 无法提取正文。此时必须：(1) 用 DocScan 转换该 docx；(2) 或用 Read 工具直接读该 docx（多模态识别）；(3) 仍失败则在清单中保留该行、列结构写 未能提取需人工核对，绝不可省略该行。
+### docx 提取异常处理（先验图，再定性；禁止静默跳过）：当某 docx 抽取文本很少（仅一个词/标题，如 业绩/信誉/技术力量1）时，**先查 `word/media/*` 有没有内嵌图，再决定怎么办**——绝不可凭"抽取字数少"直接断定为图片型（历史 bug：把空模板误判成图片型、白白跑 DocScan/多模态）：
+- **无内嵌图、无表格、仅标题/占位符** → 这是**空封面模板**（投标人自填证明材料）。在清单保留该行、列结构写"封面模板（投标人自填，无可提取正文）"。**无需 DocScan、无需多模态 Read**。
+- **有内嵌图（`word/media/*`）且正文极少** → 才是真正的**图片型/扫描件 docx**。DocScan 无 OCR、转出来也是空，故**按 §0.3 提醒用户**；清单保留该行、列结构写"图片型/扫描件，需用户确认"。
+- **有表格但 python-docx 读不全**（合并单元格错位、嵌套表等）→ 走方式 A DocScan 重读表格。
+**绝不可省略清单中的任何一行。**
 
-### 价格类表格特殊提取规则（开标一览表/价格构成表/报价表）：此类模板通常为 封面元信息(项目名称/编号/包号/投标人) + 明细表(品目/货物/单价/数量/总价)，封面元信息不等于表格列结构，必须分别记录。强制：① 必须打开附件目录中的原始模板文件（PDF 用 Read 读全页，DOCX 用 DocScan/python-docx 读所有表格），禁止仅凭主文件描述臆造列结构；② 找到明细表区域按原文表头逐字抄录列名与顺序；③ 封面元信息写入特殊说明列，不写入列结构列。
+### 价格类表格特殊提取规则（开标一览表/价格构成表/报价表）：此类模板通常为 封面元信息(项目名称/编号/包号/投标人) + 明细表(品目/货物/单价/数量/总价)，封面元信息不等于表格列结构，必须分别记录。强制：① 必须打开附件目录中的原始模板文件（PDF 用 parse_pdf.py/Read 读全页；DOCX 按 §1.2 分流——有明细表走 DocScan、无表走 python-docx），禁止仅凭主文件描述臆造列结构；② 找到明细表区域按原文表头逐字抄录列名与顺序；③ 封面元信息写入特殊说明列，不写入列结构列。
 
 ## 投标文件组成与结构
 
@@ -594,11 +596,13 @@ for table in doc.tables:
 3. **逐项列出每个文件**：提取招标文件要求的每一份文件/附件，保留原文的编号和名称
 4. **标注属性**：对每个文件标注是否必须（★）、是否为实质性格式、对应的评分项
 5. **标注编写归属**：根据招标文件评分标准中的原文分类（商务部分/技术部分），标注每个文件由哪个下游 skill 编写（商务标/技术标）
+6. **判定并显式写出输出模式（关键，下游唯一依据）**：数本章节顶层 `###` 分册/部分的数量。`≥ 2` 个 → `输出模式: 多册`；否则 → `输出模式: 单册`。在下方"投标文件组成"输出块的**开头**显式写出 `**输出模式: ...**` 和 `**册别清单: ...**`（多册时列出各册原文名称）。**这是 bid-md2doc 决定生成单册还是多册 Word 的唯一依据，必须显式写出，不得省略、不得靠"是否提及册别"暗示。**
 
 ```markdown
 ## 投标文件组成
 
-（按招标文件原文的分类方式组织，以下为输出格式示例）
+**输出模式: {单册 | 多册}**   ← 判定:本节顶层 `###` 分册数 ≥ 2 → 多册；否则单册
+**册别清单: {按招标文件原文逐册列出的册名}**   ← 多册时按原文册数逐一列出（2 册、3 册…以招标文件的实际分册为准，不预设数量；单册可省略此行）
 
 ### {招标文件中第一部分的原文名称}
 

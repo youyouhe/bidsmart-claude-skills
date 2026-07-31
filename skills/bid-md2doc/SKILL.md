@@ -69,9 +69,13 @@ ls 响应文件/*.md 2>/dev/null
 
 #### 1.3 判定输出模式与命名规则
 
-根据册别结构判定输出模式：
-- **单册模式**：分析报告未提及册别结构或标注"单册" → 生成一个 Word 文件
-- **多册模式**：分析报告指定了多册结构 → 每册生成一个独立 Word 文件
+**优先读分析报告 `投标文件组成` 节开头的 `输出模式` 字段**（bid-analysis 已按"顶层 `###` 分册数 ≥ 2 → 多册"显式写出，并附 `册别清单`）：
+
+- **`输出模式: 多册`** → 按 `册别清单` 把响应文件分册，**每册生成一个独立 Word**（用 `excludeFiles` 排除非本册文件 + S8/S10 内部文件）
+- **`输出模式: 单册`** → 生成一个 Word 文件
+- **报告无此字段（旧报告/缺失）** → 回退：数 `投标文件组成` 节顶层 `###` 分册/部分的数量，`≥ 2` → 按多册处理，否则单册
+
+**文件分册依据**：`投标文件组成` 节各 `### {册名}` 子表已列出每册包含的文件（原文名称）。生成的 `响应文件/NN-{文件名}.md` 按名称匹配归属到对应册。
 
 **简称生成规则**（用于拼接输出文件名如 `响应文件-{公司简称}-{项目简称}.docx`）：
 
@@ -90,17 +94,16 @@ ls 响应文件/*.md 2>/dev/null
 投标文件（{册别名称}）-{投标人简称}.docx
 ```
 
-**⚠️ 输出位置硬性约束**：.docx **必须写到 workDir 根目录**（如 `{workDir}/投标文件（商务技术文件）-琪信通达.docx`）。
-**禁止**自建 `输出/`、`output/`、`docx/` 等新顶层目录"分类存放"——平台 UI 只扫描固定目录清单（workDir 根目录的 .md/.docx、`响应文件/`、`评估报告/`、`项目文档/`、`ppt/`），写进其他目录的成品文件**用户在界面上永远看不到**（真实事故：agent 把三册 docx 写进自建的 `输出/`，用户找不到成品）。
-
 ### 2. 运行生成脚本
 
 **优先使用 `generate_docx` 工具**（系统内置，结构化参数直传，无需拼接/转义 JSON 字符串，也无需先确认脚本路径/npm 依赖——工具内部已固定处理）：
 
+> 📁 **输出目录约定**：最终 Word 统一输出到独立的 **`{workDir}/输出/`** 目录，与 `响应文件/` 中的 .md 源文件**分开存放**，便于一眼辨识成品与源文件。脚本/工具会自动创建该目录。
+
 ```
 generate_docx(
   inputDir="{工作目录}/响应文件",
-  outputFile="响应文件-{公司简称}-{项目简称}.docx",
+  outputFile="{工作目录}/输出/响应文件-{公司简称}-{项目简称}.docx",
   headerText="{项目全称} 响应文件",
   footerCompany="{公司全称}"
 )
@@ -113,7 +116,7 @@ generate_docx(
 ```
 generate_docx(
   inputDir="{workDir}/响应文件",
-  outputFile="{workDir}/响应文件-{公司简称}-{项目简称}.docx",
+  outputFile="{workDir}/输出/响应文件-{公司简称}-{项目简称}.docx",
   headerText="{项目全称} 响应文件",
   footerCompany="{公司全称}",
   excludeFiles=["核对报告.md","装订指南.md","00-目录.md","crossref_mapping.json","扫描件资料清单.md","扫描件替换完成报告.md","信息填写进度报告.md","Word文档待完善清单.md"]
@@ -128,7 +131,7 @@ generate_docx(
 # 第一册：资格证明文件（排除除 00-资格证明文件.md 外的所有其他 .md）
 generate_docx(
   inputDir="{workDir}/响应文件",
-  outputFile="{workDir}/投标文件（资格证明文件）-{投标人简称}.docx",
+  outputFile="{workDir}/输出/投标文件（资格证明文件）-{投标人简称}.docx",
   headerText="{采购编号} 投标文件（资格证明文件）",
   footerCompany="{公司全称}",
   excludeFiles=["01-商务文件.md","02-技术方案.md", "...其余所有非本册文件"]
@@ -137,7 +140,7 @@ generate_docx(
 # 第二册：商务技术文件
 generate_docx(
   inputDir="{workDir}/响应文件",
-  outputFile="{workDir}/投标文件（商务技术文件）-{投标人简称}.docx",
+  outputFile="{workDir}/输出/投标文件（商务技术文件）-{投标人简称}.docx",
   headerText="{采购编号} 投标文件（商务技术文件）",
   footerCompany="{公司全称}",
   excludeFiles=["核对报告.md","装订指南.md","00-目录.md","crossref_mapping.json","00-资格证明文件.md"]
@@ -146,7 +149,7 @@ generate_docx(
 
 字段说明：
 - `inputDir`：`响应文件/` 的绝对路径
-- `outputFile`：输出文件路径（建议写绝对路径）。**必须指向 workDir 根目录**——不得指向自建子目录（见 §1.3 输出位置硬性约束）
+- `outputFile`：输出文件路径（建议写绝对路径或相对于 inputDir）
 - `headerText`：页眉文字
 - `footerCompany`：页脚公司名
 - `excludeFiles`：排除的文件列表。**始终包含 S8/S10 内部文件**（核对报告、装订指南、00-目录、crossref_mapping 等）；多册模式下还要排除"属于其他册"的文件
@@ -167,31 +170,13 @@ generate_docx(
 
 #### 3.0 检查 DocScan 可用性
 
-先解析 DocScan 地址（Web 会话由平台注入 `DOCSCAN_URL`；CLI/插件从平台同步到磁盘的 `services.env` 加载）：
+🔒 DocScan 密钥/地址由平台服务端持有（`docscan` 工具内置），agent 无需也不应接触 `${DOCSCAN_API_KEY}`/`${DOCSCAN_URL}`（沙箱 env 已无密钥）。直接用工具探活：
 
-```bash
-# ── DocScan 配置引导（Web 内嵌 / CLI 插件 通用；每次用 DocScan 前执行一次）──────
-# 消除 ${DOCSCAN_URL} 为空时静默回退 localhost:8800 导致的「DocScan 离线」误判。
-# Web：DOCSCAN_URL 已由平台注入（沙箱继承）→ 跳过文件加载，env 为权威（避免磁盘旧值覆盖）。
-# CLI：$DOCSCAN_URL 为空 → 从平台同步到磁盘的 services.env 加载（DB 权威源；API 启动与设置变更时刷新）。
-if [ -z "${DOCSCAN_URL:-}" ]; then
-  for _f in "${DOCSCAN_CONFIG_FILE:-}" \
-            "${SMARTBID_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/smartbid}/services.env" \
-            "${XDG_CONFIG_HOME:-$HOME/.config}/smartbid/services.env"; do
-    [ -n "$_f" ] && [ -f "$_f" ] && [ -r "$_f" ] && { set -a; . "$_f"; set +a; break; }
-  done
-  unset _f
-fi
-: "${DOCSCAN_URL:=http://localhost:8800}"   # 仍未配置则保留本地默认；离线由可用性检测兜底
-```
+调用 `docscan(operation: "health")` 返回在线状态。
 
-```bash
-curl -s -o /dev/null -w "%{http_code}" -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/health"
-```
-
-- **返回 200** → 继续 3.1
-- **连接失败/超时** → 跳过整个步骤 3，输出提示：
-  > DocScan 服务（`$DOCSCAN_URL`，未设置时 `http://localhost:8800`）当前不可用，跳过后期增强（交叉引用、占位符清扫）。已生成的 docx 文件不受影响，可正常使用。
+- **在线** → 继续 3.1
+- **离线/超时** → 跳过整个步骤 3，输出提示：
+  > DocScan 服务当前不可用，跳过后期增强（交叉引用、占位符清扫）。已生成的 docx 文件不受影响，可正常使用。
   
   然后直接跳到步骤 4（报告生成结果）
 - **AUTO_MODE=true** 时 DocScan 不可用 → 同上跳过，在完成状态中标注"DocScan 离线，跳过后期增强"
@@ -200,34 +185,13 @@ curl -s -o /dev/null -w "%{http_code}" -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${D
 
 将 generate_docx.js 生成的 docx 上传到 DocScan，使其可被编辑：
 
-```bash
-FID=$(curl -s -X POST -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/upload" \
-  -F "file=@{outputFile路径}" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
-echo "DocScan FID: $FID"
-```
+调用 `docscan(operation: "upload", filePath: "<outputFile 绝对路径>")` → 返回 `fid`。
 
-**多册模式**：
-```bash
-# 对每个 docx 执行
-for docx in "{workDir}/投标文件（资格证明文件）-{投标人简称}.docx" "{workDir}/投标文件（商务技术文件）-{投标人简称}.docx"; do
-  FID=$(curl -s -X POST -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/upload" -F "file=@$docx" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
-  echo "DocScan FID for $docx: $FID"
-  # 记录 FID → 文件映射，供 3.2-3.4 循环使用
-done
-```
+**多册模式**：对每个 docx 各调用一次 `docscan(operation: "upload", filePath: "<该 docx 绝对路径>")`，记录各自 `fid` → 文件映射，供 3.2-3.4 循环使用。
 
 #### 3.2 占位符最终清扫
 
-```bash
-curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/$FID/placeholders" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-phs = data.get('placeholders', [])
-print(f'占位符总数: {data[\"count\"]}')
-for ph in phs:
-    print(f'  {ph[\"id\"]}: {ph[\"text\"]}  [{ph[\"location\"]}]  {ph[\"path\"]}')
-"
-```
+调用 `docscan(operation: "placeholders", fid: "<fid>")` → 返回占位符列表（总数 + 每条的 id/文本/位置/路径）。
 
 **分类判断**（LLM 分析 placeholders 输出）：
 - **预期存在的占位符**：如 `【此处插入营业执照扫描件】`、`【此处插入XX图】` — 这些是扫描件/图表的正常占位，需用户后续手动替换为实际扫描件
@@ -260,17 +224,13 @@ for ph in phs:
 
 **3.3.1 列出所有表格，定位索引表**
 
-```bash
-curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/$FID/tables"
-```
+调用 `docscan(operation: "tables", fid: "<fid>")` → 返回所有表格列表。
 
 LLM 分析返回的表格列表，找到索引表（特征：含有"序号"/"附件名称"/"文件"/"页码"等列头）。记录索引表的 `table[N]` 路径。
 
 **3.3.2 获取正文段落，匹配索引项**
 
-```bash
-curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/$FID/preview"
-```
+调用 `docscan(operation: "preview", fid: "<fid>")` → 返回正文段落列表（含段落路径）。
 
 LLM 分析返回的段落列表，为索引表中的每个附件找到正文中对应的首次出现位置：
 - 从索引表"附件名称"列读取条目（如"报价函"、"法定代表人授权委托书"）
@@ -287,15 +247,7 @@ LLM 分析返回的段落列表，为索引表中的每个附件找到正文中�
 
 对索引表中需要页码的每一行：
 
-```bash
-curl -s -X POST -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/$FID/crossref" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "keyword": "{正文中唯一的关键文本}",
-    "cellPath": "table[{N}].row[{R}].cell[{C}]",
-    "paragraphPath": "paragraph[{P}]"
-  }'
-```
+调用 `docscan(operation: "crossref", fid: "<fid>", keyword: "<正文中唯一的关键文本>", cellPath: "table[{N}].row[{R}].cell[{C}]", paragraphPath: "paragraph[{P}]")`（keyword 全文唯一时 `paragraphPath` 可省略）。
 
 参数说明：
 - `keyword`：正文中要打书签的精确文本（必须在 body 段落中，不能在表格内）
@@ -321,11 +273,7 @@ DocScan 内部自动完成：
 
 #### 3.4 下载增强后的 docx
 
-```bash
-curl -s -H "X-API-Key: ${DOCSCAN_API_KEY:-}" "${DOCSCAN_URL:-http://localhost:8800}/api/docx/$FID" -o "{outputFile路径}"
-```
-
-覆盖原始的 generate_docx.js 输出文件，完成增强。
+调用 `docscan(operation: "download", fid: "<fid>", outputPath: "<outputFile 绝对路径>")` → 下载增强后的 docx，覆盖原始的 generate_docx.js 输出文件，完成增强。
 
 **多册模式**：每个 docx 分别下载覆盖。
 
