@@ -230,14 +230,13 @@ date +%Y    # 取系统当前年份
 
 **🚨 硬性规则：禁止在未尝试 MaterialHub 查询的情况下直接向用户发送信息收集问卷。** 进入 S4 后的第一个动作必须是：
 
-1. 用 `bash` 实际调用 MaterialHub 查询（不是"想起来了"而是必须执行）：
-   ```bash
-   curl -s -m 8 -G -H "Authorization: Bearer $MATERIALHUB_API_KEY" \
-     --data-urlencode "q=<公司名>" --data-urlencode "entity_type=org" \
-     "$MATERIALHUB_API_URL/api/v2/entities/?limit=5"
+1. 用平台提供的 `material_hub_search` / `material_hub_list_entities` / `material_hub_entity_documents` 工具实际查询（不是"想起来了"而是必须执行）：
    ```
-   （`MATERIALHUB_API_KEY` / `MATERIALHUB_API_URL` 已在环境变量中，由系统设置配置；若无该公司名称则先用 `search_materials` 查库中有哪些公司，向用户确认本次投标主体后再查）
-2. 只有以下情况才允许直接向用户发问卷：(a) curl 返回 401/连接失败（服务不可用）；(b) 库中查无此公司/此类材料。且问卷开头必须注明"已尝试查询资料库：未命中（原因）"。
+   material_hub_entity_documents(entityName: "<公司名>")
+   ```
+   查不到候选公司时，先用 `material_hub_list_entities(entityType: "org")` 看库中有哪些公司，向用户确认本次投标主体后再查。
+   🔒 密钥与地址由平台服务端持有，agent **无需也不应接触任何 key/地址**——不要用 `bash`/`curl` 拼 `$MATERIALHUB_API_KEY`/`$MATERIALHUB_API_URL`（沙箱 env 已无密钥，裸 curl 只会带空 token 出去，白白多一次失败请求；且这类指令本身是不该存在的坏样例）。所有查询走上述工具，不经过 bash。
+2. 只有以下情况才允许直接向用户发问卷：(a) 工具返回服务不可用/连接失败；(b) 库中查无此公司/此类材料。且问卷开头必须注明"已尝试查询资料库：未命中（原因）"。
 
 **此阶段仍必须暂停等待用户输入，但优先顺序变了：先尝试从 MaterialHub 查候选数据供用户确认，查不到或属于决策类信息才让用户从头填写。** 查询到候选后的确认/筛选流程，读 bid-commercial-proposal/SKILL.md 的"步骤2：收集公司信息"并执行（该 skill 已内建各类信息的查询-确认细则），而不是在本 skill 里另起一套收集逻辑：
 
