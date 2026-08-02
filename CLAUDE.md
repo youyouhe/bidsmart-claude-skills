@@ -101,6 +101,27 @@ Image/screenshot/scan placeholders use a **unique-id + JSON registry** pattern s
 
 老项目里的 legacy 占位符 `【此处插入XX图/截图/扫描件】`（无 id）仍由 `bid-assembly` §5.3 兜底清扫；**新项目一律用对照表**。
 
+### Mock materials registry (mock_materials_registry.json)
+
+MaterialHub 目前配置为 mock 数据（出于用户隐私考虑，暂未接入真实资质库）。招标要求的某类材料在 MaterialHub 中零命中时，`bid-material-search` 可调用 `material_hub_mock_generate` 工具按需生成一份贴合该要求的临时材料（见其 SKILL.md "Mock 生成兜底路径"），而不是直接留空占位符——但生成的是**假材料**，必须被显式追踪、最终提醒用户替换。
+
+**对照表文件**：项目工作目录根的 `mock_materials_registry.json`（与 `placeholders.json` 同级）。
+
+**Schema**：
+```json
+{ "items": [
+  { "document_id": 42, "doc_type_code": "iso-cert", "entity_name": "星辰科技有限公司",
+    "requirement_text": "投标人须具备ISO27001信息安全管理体系认证",
+    "placeholder_id": "iso27001-cert", "generated_at": "2026-08-02T10:00:00Z" }
+]}
+```
+
+**写入方**（`bid-material-search`）：每次调用 `material_hub_mock_generate` 成功生成一份材料，就向本文件 append 对应 item（`document_id` 幂等去重）。同时在对应的 `placeholders.json` item 上追加 `is_mock_pending_replacement: true` 标记（而非直接标 `done`——材料确实已替换进正文，但来源是假的，需要这个标记与"真实材料替换完成"区分）。
+
+**读取方**（`bid-assembly` 质检阶段）：交付前检查本文件是否非空。非空则在最终交付说明中用**最高优先级（🔴）**列出待替换材料清单（材料类型、对应招标要求原文、MaterialHub 文档 id），不得被其他"✅ 已完成"的措辞掩盖。也可调用 `material_hub_mock_pending_list` 工具做一次服务端权威核对（同一份材料若已被用户在 MaterialHub 替换为真实材料，会从该工具的返回结果中消失，即使本地 registry 文件未同步更新，也应以服务端结果为准）。
+
+**不产生本文件**：如果本次投标 MaterialHub 检索全部命中真实材料（未触发任何 mock 生成），本文件不应被创建——它的存在本身就是"本次标书含未替换假材料"的信号，不能因为流程需要就无条件创建空文件。
+
 ### File naming (hardcoded dependencies)
 - `分析报告.md` — exact name required; every downstream skill reads it. Also fixed: `响应文件/` numbered files, `pipeline_progress.json`, `diagram-N.png` (sequential).
 

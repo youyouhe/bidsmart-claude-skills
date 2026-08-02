@@ -73,6 +73,30 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8201/health
 
 **阴性结果规则（最易被忽略，必须执行）：** 任一占位符走完全部级别仍零命中，**必须**在批量替换结果里把它列入"未替换占位符清单"（计入 `failed_count`，语义界定为"零命中"而非"下载失败"），并在完成状态块报告 `未替换占位符: N` 及清单。**禁止**静默保留占位符假装完成，也禁止把"零命中"混入 `ambiguous_count`。
 
+#### Mock 生成兜底路径（MaterialHub 当前为 mock 数据环境）
+
+MaterialHub 目前配置为 mock 数据（出于用户隐私考虑，暂未接入真实资质库）。库中现有材料是提前生成的种子样例，与具体招标项目的资质要求未必匹配。**上述五级检索全部零命中后**，不要直接把占位符列入"未替换清单"就结束——先尝试按需生成一份贴合本次招标要求的临时材料：
+
+1. **前置条件（不可跳过）**：五级检索（实体聚合→下钻→关键词→语义/多跳→图谱探索）必须已全部执行完毕、确认零命中。**禁止跳过检索直接生成**——生成只是检索失败后的兜底，不是默认路径。
+2. **确认投标主体已存在**（这一步不能省略）：`entityName` 必须是本次已确认的投标主体（用户指定，或库中已有的实体）。如果连投标主体本身在 MaterialHub 中都完全查无（不是缺某份材料，是整个公司都没有），需先向用户确认是否允许连公司基础档案（营业执照等）一起 mock 占位——这是比"缺一份证书"更大的决定，参考 `bid-manager` SKILL.md S4 阶段的对应规则，不要在本 skill 里自行决定。
+3. **确认材料类型码存在**：用 `material_hub_doc_types` 查该类型码（如 `iso-cert`）是否在 MaterialHub 目录里。**不存在则不能生成**——直接回退到"未替换占位符清单"路径，不得强行用相近类型码替代（如招标要求"纳税信用A级证书"但库里没有对应类型码，不能拿 `qualification-cert` 强行凑）。
+4. **调用 `material_hub_mock_generate`**：
+   ```
+   material_hub_mock_generate(
+     docTypeCode: "<确认存在的类型码>",
+     entityName: "<本次已确认的投标主体>",
+     requirementText: "<招标原文条款片段，直接摘录，不要转述改写>",
+     tenderProject: "<项目名称/编号>",
+   )
+   ```
+   `requirementText` **必须是原文摘录**，不要每次用不同措辞转述同一条要求——MaterialHub 按 `entityName`+`docTypeCode`+`requirementText` 做幂等判断，措辞不一致会导致重复生成多份材料。
+5. **登记 `mock_materials_registry.json`**（与 `placeholders.json` 同级，schema 见 `packages/bidsmart-skills/CLAUDE.md` "Mock materials registry" 段）：append 一条 item，记录 `document_id`、`doc_type_code`、`entity_name`、`requirement_text`、对应的 `placeholder_id`。
+6. **占位符替换后标记来源**：该占位符在 `placeholders.json` 中对应 item 除了正常的 `status="done"` + `asset=<路径>`，额外加 `is_mock_pending_replacement: true`，与"真实材料替换完成"区分。
+7. **即时告知用户（不阻塞，AUTO_MODE 和交互模式一致）**：生成成功后立即在输出中提示一句，例如"⚠️ 已为『XX认证』生成临时材料（MaterialHub 暂无真实资料），标书完成后需替换为真实证书"。**不要等到最终汇总才第一次提及**——每生成一份就当场提一句，累计到完成状态块时再汇总一次数量。
+8. **仍生成失败**（类型不存在、服务不可用、Hub 返回错误）→ 回退到阴性结果规则：占位符列入"未替换占位符清单"，不伪造完成。
+
+**这条路径不改变阴性结果规则的记账方式**：Mock 生成成功的占位符不计入 `未替换占位符: N`（它确实被替换了，只是替换的是临时材料），但必须计入 `mock_materials_registry.json` 并在完成状态块单独报告"本次生成 N 份待替换材料"，与"未替换占位符"分开统计，不要混为一谈。
+
 下面是各级 API 的调用示例：
 
 ```python
