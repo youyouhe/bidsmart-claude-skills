@@ -260,7 +260,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8201/health
    - `list_entity_documents(company_name)`：枚举实体名下全部文档，按 `doc_type.code` 过滤；
    - `search_documents(query=<材料中文名>, doc_type=<material_type>, entity_name=<company_name>)`：关键词兜底。
    - 检索时**仍需遵守下文歧义规则**（命中多份不静默取第一个）。
-4. **下载/复制扫描件图到 `响应文件/`**，命名 `material-<item.id>.<ext>`（如 `material-business-license.png`）。按需加水印（§4 水印工具）。
+4. **下载扫描件图到 `响应文件/`**：用 `material_hub_download_file(fileUrl=<material_hub_document 返回的 current_revision.files[0].url>, outputPath="响应文件/material-<item.id>.<ext>")` 下载，**禁止用 `bash`/`curl` 直接请求该 URL**——沙箱 env 已剥离 `MATERIALHUB_API_KEY`，裸 curl 只会带空 token 出去、必然 401。密钥由该工具在服务端侧持有并附加，agent 不接触。按需加水印（§4 水印工具）。
 5. **替换占位符**为 Markdown 图片引用：
 
    ```
@@ -558,12 +558,12 @@ pip install httpx python-dotenv Pillow
 
 ### 问题 2: "下载图片失败"
 
-**原因**：MaterialHub API 未运行或图片 URL 不正确
+**原因**：MaterialHub API 未运行、图片 URL 不正确，或误用 `bash`/`curl` 直接请求文件 URL（沙箱内无密钥，必然 401）
 
 **解决**：
 1. 确认 MaterialHub API 运行：`curl http://localhost:8201/health`
-2. 检查环境变量 `MATERIALHUB_API_URL`
-3. 检查环境变量 `MATERIALHUB_API_KEY`
+2. 下载扫描件图**必须**用 `material_hub_download_file` 工具（密钥由服务端侧持有并自动附加），不要自己拼 key/裸 curl
+3. 若该工具本身报错，检查平台侧 `MATERIALHUB_API_URL`/`MATERIALHUB_API_KEY` 配置（这是运维排查项，非 agent 可介入）
 
 ### 问题 3: 水印不显示中文
 
