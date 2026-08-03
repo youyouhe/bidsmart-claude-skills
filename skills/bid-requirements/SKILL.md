@@ -120,7 +120,7 @@ EOF
 
 **数据源优先级（禁止自行重新划分系统编号）：**
 
-1. **首选 `system_decomposition.json`**（工作目录根，由 bid-system-decomp 生成，全流水线单一事实源）：直接镜像其 `systems[]` 到下面的 `## 系统清单` / `## 系统拆分计划` 两表——`code` / `name` / `size_grade` / `original_refs` / `function_point_count` 原样填入，**不重新编号、不重命名、不跳号**。功能点 id（`S01-001`…）仍由本 skill 在 Phase 1 按 `original_refs` 回查分析报告取需求原文后枚举。
+1. **首选 `system_decomposition.json`**（工作目录根，由 bid-system-decomp 生成，全流水线单一事实源）：直接镜像其 `systems[]` 到下面的 `## 系统清单` / `## 系统拆分计划` 两表——`code` / `name` / `size_grade` / `original_refs` / `function_point_count` 原样填入，**不重新编号、不重命名、不跳号**。功能点清单与 id（`S01-001`…）同样首选消费 json 的 `systems[].functionPoints[]`——功能点 id 是全流水线唯一连接键（截图占位符、POC manifest 均以此为准），**禁止与下游各自枚举出两套 id**。仅当 json 缺失 `functionPoints` 字段（旧版 json / schema_version 1）时，才在 Phase 1 按 `original_refs` 回查分析报告自行枚举，并在 `_metadata.md` 顶部标注 `⚠️ system_decomposition.json 缺 functionPoints，功能点 id 为本 skill 自行枚举，与截图占位符 id 可能不一致`。
 2. **json 不存在时**（兜底）：从技术响应表 / 分析报告中提取全部系统，按下述分域原则自行分组，并在 `_metadata.md` 顶部标注 `⚠️ system_decomposition.json 缺失，系统划分为本 skill 自行推断`。
 
 json 路径下，系统清单表与拆分计划表的填充方式：

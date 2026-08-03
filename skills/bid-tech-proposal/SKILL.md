@@ -883,6 +883,8 @@ jq -r '.systems[] as $s | $s.functionPoints[]? | [$s.id, .id, .name] | @tsv' sys
 【此处插入:截图:S04-002】
 ```
 
+**占位符唯一归属（强制，违反必导致下游残留标红）**：每个 FP-id 的截图占位符**只允许出现在一个文件中**——即该功能点详细功能描述所在的文件（功能响应/技术方案类文件），登记时的 `source_file` 必须就是该文件。下游 `bid-poc-screenshots` **只在 `source_file` 内定位替换**（见其 SKILL.md 的 source_file 契约），同一 id 的占位符出现在其他文件时，那些副本永远不会被替换，bid-assembly 闭环必然标红。其他文件（如 ★/▲ 证明材料文件）需要引用同一功能点的截图时，**只用文字引用**（如"功能界面截图见《31-功能响应文件》S04-003 节"），**禁止再放一个 `【此处插入:截图:…】`**。历史事故：同 id 跨 10 号/31 号文件重复放置，运行时发现后全局返工清理，且清理方案两次自相矛盾。
+
 ##### 步骤 3：登记截图占位符到对照表（强制，写完正文后执行）
 
 **每写一个截图占位符，必须用权威脚本同步登记**（禁止手写 python/jq 改 JSON）——下游 `bid-poc-screenshots` 只读 `placeholders.json`（filter `type=="screenshot"` 且 `status=="pending"`）来决定截哪些图，**不扫正文猜匹配**；不登记 = 下游不会截图。
@@ -902,7 +904,7 @@ python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py register \
 - `id` = 功能点 id（**与占位符文本里的 `<FP-id>` 完全一致**），是唯一连接键，下游按它在 `source_file` 精确定位占位符
 - `system` = 所属系统编号（如 `S04`），`function_point` = 功能点 id，`label` = 功能点名称（便于人工核对，**不参与匹配**）
 - `source_file` = **工作目录根相对路径**（脚本自动归一化，禁止裸文件名）
-- 按 `id` 幂等 upsert（同一功能点在多文件出现只登记一条，`source_file` 取该 id 首次写入的文件）
+- 按 `id` 幂等 upsert（每个 id 只登记一条；`source_file` = 该 id 占位符**唯一**所在的文件——占位符跨文件重复是编写错误，按步骤 2"占位符唯一归属"规则消除，**不得靠"取首次写入文件"掩盖**）
 - **本步只登记 `type:"screenshot"`**；图表占位符（`type:"diagram"`）由 4.2 节处理，扫描件（`type:"scan"`）由 bid-commercial-proposal 处理，不得混登
 
 ##### 自检
@@ -919,6 +921,19 @@ python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py validate
 jq -r '[.items[] | select(.type=="screenshot")] | group_by(.system) | map({system: .[0].system, n: length}) | .[] | "\(.system): \(.n)"' placeholders.json
 ```
 对照 `system_decomposition.json` 的系统清单：**每个会生成原型的系统**（非纯集成/资源类）screenshot 占位符数必须 **≥1**（建议 3-6）。存在 0 的系统 → 回到步骤 2 为其核心功能点补建占位符并登记，**不得跳过整个系统**（历史上 S01/S02/S04 整系统漏建导致其全部原型截图丢失）。
+
+**🆕 截图 id 跨文件唯一性自检（强制，对应步骤 2"占位符唯一归属"）**：每个 screenshot id 在 `响应文件/` 全目录的出现次数必须**恰好为 1**，且出现的文件 == 对照表登记的 `source_file`：
+```bash
+for id in $(jq -r '.items[] | select(.type=="screenshot") | .id' placeholders.json); do
+  hits=$(grep -rlF "【此处插入:截图:$id】" 响应文件/ 2>/dev/null)
+  n=$(echo -n "$hits" | grep -c . )
+  want=$(jq -r --arg id "$id" '.items[] | select(.type=="screenshot" and .id==$id) | .source_file' placeholders.json)
+  if [ "$n" != "1" ] || ! echo "$hits" | grep -qF "${want#响应文件/}"; then
+    echo "🔴 $id 出现 $n 次（应为 1），实际: $(echo $hits | tr '\n' ' ') 登记: $want"
+  fi
+done
+```
+全部无输出才算通过；命中项按"占位符唯一归属"规则清理副本（保留功能描述所在文件的那一处，其余改文字引用）。
 
 **🆕 图表占位符格式自检（与功能截图占位符自检并列，强制）：** 图表占位符必须严格使用 `【此处插入:图表:<slug>】` 格式（slug 取法、登记步骤见上方"图表生成规范"），下游 `bid-mermaid-diagrams` 按 `placeholders.json` 里的 `id` 精确定位后渲染。
 - **禁止无 id 旧格式**：禁止出现 `【此处插入XX图】` / `【此处插入运维组织架构图】` 这类无 slug 的旧占位符——下游按 id 定位，无 id → 该图永远不会被渲染
@@ -1139,7 +1154,7 @@ Markdown 表格用于呈现结构化数据（如进度计划表、模块列表�
 编写完成后，输出以下结构化状态摘要：
 
 ```
---- BID-TECH-PROPSAL COMPLETE ---
+--- BID-TECH-PROPOSAL COMPLETE ---
 技术细节深度: {精简型/标准型/详尽型}（{用户确认/AUTO_MODE默认}）
 目标页数: {N}页（如用户指定；否则为按档位估算的参考值）
 实际页数: {M}页（预估）

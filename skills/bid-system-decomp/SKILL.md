@@ -65,6 +65,7 @@ Read `分析报告.md` 的 `## 技术需求` 章节，逐条提取功能条目�
 - `name`：系统名（取自原文业务术语，不自造）
 - `original_refs`：该系统覆盖的原文章节号/编号列表（**必填，反幻觉锚点**）
 - `function_point_count`：该系统功能点数
+- `functionPoints`：该系统功能点明细数组（**必填，见 Step 4**）
 
 **判定 `has_system_structure`**：若本标的是纯硬件采购/纯服务采购，技术需求里没有可聚合成"系统/平台/模块"的软件功能 → `has_system_structure: false`，`systems: []`，直接写 json 并结束（下游各自退化为沿用原文编号）。
 
@@ -77,16 +78,27 @@ Read `分析报告.md` 的 `## 技术需求` 章节，逐条提取功能条目�
 
 为每个 system 标记 `ui_prototype`（bool）：该系统的功能是否属于"数据录入/统计报表/管理配置/流程审批/移动端扫码"等**有 UI 界面**的类别。纯集成/同步/对接类、纯文书报告类 → `ui_prototype: false`（poc 阶段跳过）。
 
-### Step 4：生成截图占位符
+### Step 4：形成功能点明细 `functionPoints[]`（下游截图/需求规格的连接键）
 
-为每个 `ui_prototype: true` 的 system 生成标准占位符字符串，格式**严格统一**：
+把 Step 1 提取的每一条功能条目归属到 Step 2 划分的系统后，为每条形成功能点对象，
+写入所属 system 的 `functionPoints` 数组：
 
+```json
+{ "id": "S01-001", "name": "住院医师信息管理", "original_ref": "4.2.1.1" }
 ```
-【此处插入{code}{name}功能截图】（截图需加盖公章）
-```
-示例：`【此处插入S01住院医师过程管理系统功能截图】（截图需加盖公章）`
 
-写入该 system 的 `screenshot_placeholder` 字段。tech-proposal 将原样复制此字符串，**不得自行拼接**。
+- `id`：`{code}-{序号:03d}`，**每个系统内从 001 起连续递增、不得跳号**（S01-001、S01-002…，禁止 S01-001、S01-003）
+- `name`：功能点名称（取自原文条目文字，可截短，不自造）
+- `original_ref`：该功能点的原文编号（反幻觉锚点，必填）
+
+**功能点 id 是全流水线唯一连接键**：bid-tech-proposal 的截图占位符（`【此处插入:截图:<FP-id>】`）、
+bid-requirements 的功能点编号、bid-poc 的 manifest 一律消费这里的 `functionPoints[].id`，
+禁止下游各自重新枚举。本字段缺失 = 下游截图占位符体系整体失效（历史事故：S3 未产出
+functionPoints，S6 运行时由 manager 手工补 json，id 与需求规格枚举结果存在漂移风险）。
+
+> 旧的系统级 `screenshot_placeholder` 字段（`【此处插入{系统标识}功能截图】`）**已废弃，不再生成**——
+> 截图占位符已改为功能点粒度，由 bid-tech-proposal 按 `functionPoints[].id` 自行放置。
+
 
 ### Step 5：汇总 totals
 
@@ -106,7 +118,7 @@ Read `分析报告.md` 的 `## 技术需求` 章节，逐条提取功能条目�
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "source": "分析报告.md#技术需求",
   "has_system_structure": true,
   "systems": [
@@ -117,7 +129,10 @@ Read `分析报告.md` 的 `## 技术需求` 章节，逐条提取功能条目�
       "size_grade": "中",
       "function_point_count": 18,
       "ui_prototype": true,
-      "screenshot_placeholder": "【此处插入S01住院医师过程管理系统功能截图】（截图需加盖公章）"
+      "functionPoints": [
+        { "id": "S01-001", "name": "住院医师信息管理", "original_ref": "4.2.1.1" },
+        { "id": "S01-002", "name": "过程记录与跟踪", "original_ref": "4.2.1.2" }
+      ]
     }
   ],
   "totals": { "systems": 7, "function_points": 61, "▲": 9, "★": 3 }
@@ -130,8 +145,11 @@ Read `分析报告.md` 的 `## 技术需求` 章节，逐条提取功能条目�
 
 1. **编号连续**：`S01, S02, …, S0N` 无跳号、无重复。
 2. **锚点可回溯**：每个 system 的 `original_refs` 都能在 `分析报告.md#技术需求` 找到对应文字。抽 2 个 system 回读原文核对。
-3. **计数自洽**：`totals.function_points` == 各 `function_point_count` 之和；`totals.▲` == Step 1 清点；`totals.★` == Step 1 清点。
-4. **占位符一致**：所有 `ui_prototype: true` 的 system 都有 `screenshot_placeholder`，且格式统一。
+3. **计数自洽**：`totals.function_points` == 各 `function_point_count` 之和 == 全部 system 的 `functionPoints[]` 长度之和；`totals.▲` == Step 1 清点；`totals.★` == Step 1 清点。
+4. **功能点 id 自洽（强制）**：每个 system 内 `functionPoints[].id` 从 `{code}-001` 起连续无跳号、无重复；每条都有 `name` 与 `original_ref`；每个 system 的 `function_point_count` == 其 `functionPoints.length`。可用一条命令核验：
+   ```bash
+   node -e "const j=require('./system_decomposition.json');let bad=0;for(const s of j.systems){const fps=s.functionPoints||[];fps.forEach((f,i)=>{const want=s.code+'-'+String(i+1).padStart(3,'0');if(f.id!==want){console.error('id不连续:',f.id,'应为',want);bad=1}});if(fps.length!==s.function_point_count){console.error(s.code,'count不符');bad=1}};const sum=j.systems.reduce((a,s)=>a+(s.functionPoints||[]).length,0);if(sum!==j.totals.function_points){console.error('totals不符',sum);bad=1}process.exit(bad)"
+   ```
 5. 与分析报告完成摘要里的 `▲功能条目` 计数比对——若不一致，以本 skill 逐条清点结果为准。
 
 ## 完成状态块

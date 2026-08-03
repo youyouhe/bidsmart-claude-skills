@@ -312,6 +312,24 @@ bash scripts/render.sh input.mmd output.png 1400 2
 
 渲染输出的 PNG 保存到目标 markdown 文件的同目录。
 
+#### mmdc 渲染失败排障（强制按序诊断，禁止直接降级）
+
+mmdc 自身不含浏览器，它通过 **puppeteer 的缓存目录解析 Chrome**：取 `$PUPPETEER_CACHE_DIR`，未设置时取 `$HOME/.cache/puppeteer`。平台沙箱内 `HOME` 被强制设为 `/tmp`——2026-08-04 起平台已向沙箱注入 `PUPPETEER_CACHE_DIR` 并只读绑定缓存目录，沙箱内外解析结果一致；S0 preflight 报 `puppeteer: ready` 即表示该缓存真实存在（能力级探测）。
+
+因此 mmdc 报 `Failed to launch the browser process` / 找不到 Chrome 时，**禁止直接断言"Chrome 未安装"然后走 archify 降级**（历史事故：agent 误判未安装，lifecycle→workflow 来回换引擎试错 5+ 轮烧掉十几分钟，其实 Chrome 一直在，只是解析路径没对上）。按序诊断：
+
+```bash
+# 1. 注入是否生效（应为宿主缓存绝对路径，如 /opt/smartbid/.cache/puppeteer；为空 = 平台注入失效，上报用户，不要降级）
+echo "$PUPPETEER_CACHE_DIR"
+# 2. 缓存里是否真有 Chrome 二进制
+ls "$PUPPETEER_CACHE_DIR"/chrome/*/chrome-linux64/chrome
+# 3. mmdc 实际解析到的路径（确认与上一致）
+node -e "const p=require('/lib/node_modules/@mermaid-js/mermaid-cli/node_modules/puppeteer');console.log(p.executablePath())"
+```
+
+- 三步都正常但仍失败 → 看 stderr 原文：`Running as root without --no-sandbox` 只会出现在 root 直跑场景，平台沙箱以非 root 运行不会遇到；其他错误按原文修。
+- 仅当 **S0 preflight 报 mmdc/puppeteer missing**，或上述诊断确认缓存确实不存在时，才允许 archify 降级。降级时甘特图优先 `lifecycle`（实施阶段=状态节点）或 `workflow`（阶段=泳道节点），并遵守对应 type 的 layout budget（见 3a 各节：workflow 列间距不均、同 lane 连续节点用宽松列；lifecycle 对宽度敏感）。**布局校验报错时按报错里的具体建议逐项调（labelAt/width/col/删 label），不要换引擎来回试。**
+
 **⭐ 自动水印功能**：
 `render.sh` 脚本在渲染完成后会自动尝试添加项目名称水印：
 - 从当前目录的 `分析报告.md` 中自动提取项目名称
