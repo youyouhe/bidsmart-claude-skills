@@ -6,6 +6,7 @@ description: >
   当用户要求"插入原型截图"、"替换功能截图占位符"、"poc截图"时触发。
   前置条件：响应文件/ 目录下已存在技术标书 .md 文件，工作目录根有 placeholders.json，且系统原型已生成（workDir/poc/ 下有子目录）。
 tools: [read, write, bash, poc_screenshot]
+requires: [puppeteer]
 ---
 
 # 系统原型截图占位符替换
@@ -22,13 +23,15 @@ tools: [read, write, bash, poc_screenshot]
    ```
    如果返回 0，则没有 POC 可截图，输出状态 `SKIPPED` 并结束。
 
-2. 确认技术标书文件与对照表存在：
+2. 确认技术标书文件与对照表存在，并归一化旧表路径：
    ```bash
    ls 响应文件/*.md 2>/dev/null
-   ls placeholders.json 2>/dev/null
+   python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py normalize 2>/dev/null
+   python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py stats
    ```
    - 没有 .md 文件 → 状态 `SKIPPED` 并结束。
    - 没有 placeholders.json → 走 §3 legacy 兜底路径（仅扫旧式无 id 占位符）。
+   - `source_file` 一律为**工作目录根相对路径**（normalize 已保证），直接打开，禁止自行拼接 `响应文件/` 前缀。
 
 3. 探活浏览器运行时（避免 Puppeteer 在沙箱外启动失败后空等超时，详见 gotchas.md）：
    ```bash
@@ -83,7 +86,10 @@ screenshots-map.json 示例：
 
 label 优先取 item.label；缺失时取 `system_decomposition.json` 里该功能点的 name。**label/图注中禁止出现 "POC"、"概念验证"、"Demo" 字样**——这些文字会进入标书正文，评委可见，一律用"系统原型"口径（与 bid-tech-proposal §4.2.1 措辞规则一致）。
 
-**(d) 回填 placeholders.json**：该 item `status="done"`，`asset=<file 相对路径>`（相对工作目录根，如 `响应文件/poc-S04-性能预报系统-实时预报.png`）。按 id 幂等更新。
+**(d) 回填 placeholders.json（用权威脚本，禁止手改 JSON）**：
+```bash
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py mark-done --id <item.id> --asset <file 路径>
+```
 
 ### 2.5 孤儿截图兜底插入（确保每张 POC 截图都进标书）
 
@@ -98,7 +104,14 @@ label 优先取 item.label；缺失时取 `system_decomposition.json` 里该功�
    - **插入点**：优先该功能点小节末尾（`#### S01-005 …` 之后、下一个 `####`/`###` 之前）；功能点小节不存在则插到系统小节末尾。
    - **插入内容**：一行 `![系统原型 - <功能点名|系统名>](<file>)`（**裸文件名，不加 `响应文件/` 前缀**——md 文件与截图同在 `响应文件/` 下，generate_docx.js 的 baseDir 已是该目录，加前缀会变成 `响应文件/响应文件/...` 导致 Word 找不到图）。措辞用"系统原型"，**禁 POC/概念验证/Demo**。
 3. **默认视图去重**：同一系统只要已有任意截图落位，其 `functionPointId=null` 默认视图**不再补插**；仅当某系统**零张落位**时，用默认视图兜底插一张，确保每个有 POC 的系统至少出现一张原型截图。
-4. **回填对照表**：每张补插的截图向 placeholders.json 幂等 upsert screenshot item（`id` = functionPointId 或 `<系统编号>-prototype`、`type=screenshot`、`status=done`、`asset=响应文件/<file>`），使 bid-assembly 闭环校验通过。
+4. **回填对照表**：每张补插的截图用权威脚本登记（脚本幂等 upsert，已存在则跳过 status/asset 之外的字段——对补插项需先 register 再 mark-done）：
+   ```bash
+   python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py register \
+     --id <functionPointId 或 S0N-prototype> --type screenshot --source-file <落位的 md 文件>
+   python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py mark-done \
+     --id <functionPointId 或 S0N-prototype> --asset <file>
+   ```
+   使 bid-assembly 闭环校验通过。
 
 > 本步是"截图不进 Word"的最终兜底：即使上游占位符缺失/命名不一致，只要生成了原型视图，就保证它进入标书。
 

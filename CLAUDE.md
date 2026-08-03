@@ -92,12 +92,15 @@ Image/screenshot/scan placeholders use a **unique-id + JSON registry** pattern s
 - `type` ∈ `screenshot` | `diagram` | `scan`。
 - `status` ∈ `pending`（写入方登记）| `done`（替换方替换后回填 `asset`）。
 - `asset` = 产物相对路径（png / 扫描件图），由替换方填写。
+- `source_file` = **工作目录根相对路径**（如 `响应文件/00-资格证明文件合集.md`、`项目文档/01-需求分析/S01-xxx/00-概述.md`），禁止裸文件名——裸文件名曾导致 S9/S11/S12 各自临时拼接目录前缀、同一 bug 反复修。
 
-**写入方**（`bid-tech-proposal` 写 截图/图表，`bid-commercial-proposal` 写 扫描件）：每在正文写一个占位符，就向 `placeholders.json` upsert 对应 item（按 `id` 幂等去重）。
+**权威读写工具（强制使用）**：`$SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py`。写入方登记用 `register`（自动归一化 source_file + 幂等 upsert，禁止手写 python/jq 改 JSON）；校验方用 `validate`（闭环校验，🔴 退出码 1）；统计用 `stats`；旧表迁移用 `normalize`。
+
+**写入方**（`bid-tech-proposal` 写 截图/图表，`bid-commercial-proposal` 写 扫描件）：每在正文写一个占位符，就用 `register` 向 `placeholders.json` upsert 对应 item（按 `id` 幂等去重）。
 
 **替换方**（`bid-poc-screenshots` / `bid-mermaid-diagrams` / `bid-material-search`）：读 `placeholders.json`，filter `type` = 自己的领域 且 `status` = `pending`，用 `id` 在 `source_file` 里精确定位 `【此处插入:<type>:<id>】`，替换为产物，回填 `status` = `done` + `asset`。**不做文字/前缀/label 猜测——id 是唯一连接键。**
 
-**校验方**（`bid-assembly`）：闭环核对——(a) 每个表内 `id` 在其 `source_file` 中有且仅有 1 个占位符；(b) 正文中每个占位符的 `id` 都在表里；(c) 每个 `done` item 的 `asset` 文件确实存在；(d) 所有替换器跑完后仍 `pending` 的 item → 🔴。以此捕获"表与正文漂移"。
+**校验方**（`bid-assembly`）：运行 `placeholder_registry.py validate` 做闭环核对——(a) 每个表内 `id` 在其 `source_file` 中有且仅有 1 个占位符；(b) 正文中每个占位符的 `id` 都在表里；(c) 每个 `done` item 的 `asset` 文件确实存在；(d) 所有替换器跑完后仍 `pending` 的 item → 🔴。以此捕获"表与正文漂移"。退出码非 0 必须逐项修复，不得跳过。
 
 老项目里的 legacy 占位符 `【此处插入XX图/截图/扫描件】`（无 id）仍由 `bid-assembly` §5.3 兜底清扫；**新项目一律用对照表**。
 

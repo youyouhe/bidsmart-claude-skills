@@ -6,6 +6,7 @@ description: >
   生成核对报告、最终目录和装订指南。
   当用户要求检查标书、核对投标文件、质检、汇总、组装最终文件时触发。
   前置条件：需已完成 bid-tech-proposal 和/或 bid-commercial-proposal 的编写。
+requires: [python3(闭环校验脚本)]
 ---
 
 # 标书质检与组装
@@ -342,78 +343,15 @@ DocScan 预检发现的问题按以下标准分级写入核对报告：
 
 ##### 5.6.2 可复核的检查命令
 
-以下 Python 脚本一次性完成 (a)(b)(c)(d) 4 项检查，只读不写，输出每条问题的级别与具体 id/文件。在工作目录根执行：
+权威脚本一次性完成 (a)(b)(c)(d) 4 项检查（含表↔正文双向比对、asset 存在性、done 后正文残留检测），在工作目录根执行：
 
 ```bash
-python3 -c "
-import json, re, os, glob
-
-# 中文类型 <-> 英文 type 映射
-TYPE_CN = {'screenshot': '截图', 'diagram': '图表', 'scan': '扫描件'}
-# 占位符正则（捕获中文类型 + id）
-PH_RE = re.compile(r'【此处插入:(截图|图表|扫描件):([A-Za-z0-9_-]+)】')
-errors = []
-
-# 加载对照表（不存在则跳过本节）
-if not os.path.exists('placeholders.json'):
-    print('NOTE: placeholders.json 不存在，5.6 跳过（legacy 项目走 §5.3）')
-    raise SystemExit(0)
-with open('placeholders.json', encoding='utf-8') as f:
-    reg = json.load(f)
-items = reg.get('items', [])
-ids_in_registry = {it['id'] for it in items}
-
-# (a) 表→正文 一对一
-for it in items:
-    src = it.get('source_file')
-    if not src or not os.path.exists(src):
-        errors.append(f'(a) 🔴 id={it[\"id\"]} source_file 缺失或不存在: {src}')
-        continue
-    with open(src, encoding='utf-8') as f:
-        content = f.read()
-    cn = TYPE_CN.get(it.get('type'), '?')
-    exact = f'【此处插入:{cn}:{it[\"id\"]}】'
-    n = content.count(exact)
-    if n == 0:
-        errors.append(f'(a) 🔴 id={it[\"id\"]} 在 {src} 中找到 0 个占位符（正文丢了占位符）')
-    elif n > 1:
-        errors.append(f'(a) 🔴 id={it[\"id\"]} 在 {src} 中找到 {n} 个占位符（重复）')
-
-# (b) 正文→表 反查（孤儿占位符）
-for md in sorted(glob.glob('响应文件/*.md')):
-    with open(md, encoding='utf-8') as f:
-        for m in PH_RE.finditer(f.read()):
-            pid = m.group(2)
-            if pid not in ids_in_registry:
-                errors.append(f'(b) 🔴 孤儿占位符 id={pid} 在 {md} 出现，但不在 placeholders.json')
-
-# (c) done 资产落地（假完成）
-for it in items:
-    if it.get('status') == 'done':
-        asset = it.get('asset')
-        if not asset or not os.path.exists(asset):
-            errors.append(f'(c) 🔴 id={it[\"id\"]} status=done 但 asset 缺失/不存在: {asset}')
-
-# (d) 仍 pending（未替换）
-for it in items:
-    if it.get('status') == 'pending':
-        errors.append(f'(d) 🔴 id={it[\"id\"]} type={it.get(\"type\")} 仍 pending（未替换）')
-
-if errors:
-    print('PLACEHOLDER_REGISTRY_CHECK: FAIL')
-    for e in errors:
-        print(' -', e)
-else:
-    print('PLACEHOLDER_REGISTRY_CHECK: PASS（对照表与正文闭环自洽）')
-"
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py validate
 ```
 
-> **grep 兜底**（无 python 环境时可用以下命令做粗筛，但不如 python 脚本精确）：
-> ```bash
-> # 反查孤儿占位符：列出正文所有 id 占位符，与对照表 id 比对
-> grep -rhoE '【此处插入:(截图|图表|扫描件):[A-Za-z0-9_-]+】' 响应文件/*.md | sort -u
-> python3 -c "import json;print('\n'.join(sorted(i['id'] for i in json.load(open('placeholders.json'))['items'])))"
-> ```
+- 退出码 0 = 闭环自洽；非 0 = 每条 🔴/🟡 已按 id 与文件列出，逐项修复后重跑
+- 输出 JSON 中 `pending_ids` 即检查项 (d) 的仍 pending 清单
+- 该脚本是 §5.6.1 四项检查的唯一实现——禁止再手写内联 python/jq 复制这套逻辑（历史上内联副本与契约漂移过）
 
 **结果落地**：脚本输出的每条 🔴 必须写进核对报告"详细问题清单"及 `ASSEMBLY_SUMMARY` JSON 的 `red_issues[]`，`target_skill` 按 type 选：`screenshot`→`bid-poc-screenshots`、`diagram`→`bid-mermaid-diagrams`、`scan`→`bid-material-search`。
 

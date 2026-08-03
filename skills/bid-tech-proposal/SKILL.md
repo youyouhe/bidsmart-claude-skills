@@ -7,6 +7,7 @@ description: >
   当用户要求编写技术标、技术方案、技术响应文件时触发。
   也支持修复模式：当用户要求修复/补充技术文件、处理质检反馈时触发。
   前置条件：需已完成 bid-analysis 生成分析报告。
+requires: [python3(占位符登记脚本)]
 ---
 
 # 技术标编写
@@ -695,15 +696,20 @@ graph TD
 
 **登记对照表（强制，每写一个图表占位符同步执行）：** 这是占位符对照表契约 v1 的写入方职责——下游 `bid-mermaid-diagrams` 只读 `placeholders.json`（filter `type=="diagram"` 且 `status=="pending"`），按 `id` 在 `source_file` 精确定位占位符后渲染替换，**不扫正文猜匹配**；不登记 = 下游不会渲染该图。
 
-每写一个图表占位符，向工作目录根的 `placeholders.json`（与 `分析报告.md` 同级）幂等 upsert 一条 item：
+每写一个图表占位符，用权威脚本登记（禁止手写 python/jq 改 JSON）：
+```bash
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py register \
+  --id <slug> --type diagram --title "<图的中文标题>" --source-file <当前正在写的响应文件名>
+```
+生成的 item 形如：
 ```json
 { "id": "sys-arch", "type": "diagram", "title": "系统总体架构图",
-  "source_file": "16-总体技术方案.md", "status": "pending", "asset": null }
+  "source_file": "响应文件/16-总体技术方案.md", "status": "pending", "asset": null }
 ```
 - `id` = slug（**与占位符文本里的 `<slug>` 完全一致**），是唯一连接键，下游按它在 `source_file` 精确定位 `【此处插入:图表:<slug>】`
 - `title` = 图的中文标题（便于人工核对，**不参与匹配**）
-- `source_file` = **当前正在写的响应文件名**（如 `16-总体技术方案.md`）
-- 按 `id` 幂等 upsert（同一张图在多文件出现只登记一条，`source_file` 取该 slug 首次写入的文件）；`placeholders.json` 不存在时先建 `{ "version": 1, "items": [] }`
+- `source_file` = **工作目录根相对路径**（脚本自动归一化，禁止裸文件名）
+- 按 `id` 幂等 upsert（同一张图在多文件出现只登记一条，`source_file` 取该 slug 首次写入的文件）
 - **本步只登记 `type:"diagram"`**；截图（`type:"screenshot"`）由 4.2.1 节处理，扫描件（`type:"scan"`）由 bid-commercial-proposal 处理，不得混登
 
 **图表类型对照表：**
@@ -879,30 +885,33 @@ jq -r '.systems[] as $s | $s.functionPoints[]? | [$s.id, .id, .name] | @tsv' sys
 
 ##### 步骤 3：登记截图占位符到对照表（强制，写完正文后执行）
 
-**每写一个截图占位符，必须同步向工作目录根的 `placeholders.json`（与 `分析报告.md` 同级）幂等 upsert 一条 item。** 这是对照表契约 v1 的写入方职责——下游 `bid-poc-screenshots` 只读 `placeholders.json`（filter `type=="screenshot"` 且 `status=="pending"`）来决定截哪些图，**不扫正文猜匹配**；不登记 = 下游不会截图。
+**每写一个截图占位符，必须用权威脚本同步登记**（禁止手写 python/jq 改 JSON）——下游 `bid-poc-screenshots` 只读 `placeholders.json`（filter `type=="screenshot"` 且 `status=="pending"`）来决定截哪些图，**不扫正文猜匹配**；不登记 = 下游不会截图。
 
-每条 screenshot item 字段：
+```bash
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py register \
+  --id <FP-id> --type screenshot --system <S0N> --function-point <FP-id> \
+  --label "<功能点名称>" --source-file <当前正在写的响应文件名>
+```
+
+生成的 item 形如：
 ```json
 { "id": "S04-001", "type": "screenshot", "system": "S04", "function_point": "S04-001",
-  "label": "洪水预报建模", "source_file": "16-总体技术方案.md",
+  "label": "洪水预报建模", "source_file": "响应文件/16-总体技术方案.md",
   "status": "pending", "asset": null }
 ```
 - `id` = 功能点 id（**与占位符文本里的 `<FP-id>` 完全一致**），是唯一连接键，下游按它在 `source_file` 精确定位占位符
 - `system` = 所属系统编号（如 `S04`），`function_point` = 功能点 id，`label` = 功能点名称（便于人工核对，**不参与匹配**）
-- `source_file` = **当前正在写的响应文件名**（如 `16-总体技术方案.md`），下游用它定位占位符所在文件
-- 按 `id` 幂等 upsert（同一功能点在多文件出现只登记一条，`source_file` 取该 id 首次写入的文件）；`placeholders.json` 不存在时先建 `{ "version": 1, "items": [] }`
+- `source_file` = **工作目录根相对路径**（脚本自动归一化，禁止裸文件名）
+- 按 `id` 幂等 upsert（同一功能点在多文件出现只登记一条，`source_file` 取该 id 首次写入的文件）
 - **本步只登记 `type:"screenshot"`**；图表占位符（`type:"diagram"`）由 4.2 节处理，扫描件（`type:"scan"`）由 bid-commercial-proposal 处理，不得混登
 
 ##### 自检
 
-写完正文并登记对照表后，执行：
+写完正文并登记对照表后，执行权威闭环校验：
 ```bash
-# 1. 正文中的截图占位符数量
-echo "正文截图占位数: $(grep -c '此处插入:截图:' 响应文件/*.md)"
-# 2. 对照表里 screenshot pending 数量
-echo "对照表 screenshot pending: $(jq '[.items[] | select(.type=="screenshot" and .status=="pending")] | length' placeholders.json)"
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py validate
 ```
-两者必须相等；正文占位符的每个 id 都应能在对照表找到对应 item。漏预留或漏登记都会导致下游截图无处安放。
+退出码必须为 0；🔴 项逐项修复后重跑。漏预留或漏登记都会导致下游截图无处安放。
 
 **🆕 逐系统覆盖自检（强制，防整个系统被漏建占位符）**：
 ```bash

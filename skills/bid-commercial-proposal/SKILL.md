@@ -7,6 +7,7 @@ description: >
   当用户要求编写商务标、商务文件、投标附件、报价文件时触发。
   也支持修复模式：当用户要求修复/补充商务文件、处理质检反馈时触发。
   前置条件：需已完成 bid-analysis 生成分析报告。
+requires: [python3(占位符登记脚本)]
 ---
 
 # 商务标编写
@@ -400,32 +401,39 @@ write "file.md" "第二部分"  # ❌ 覆盖了第一部分！
 
 #### 登记扫描件占位符到对照表（强制，每写一个占位符同步执行）
 
-**每写一个扫描件占位符，必须同步向工作目录根的 `placeholders.json`（与 `分析报告.md` 同级）幂等 upsert 一条 item。** 这是对照表契约 v1 的写入方职责——下游 `bid-material-search` 只读 `placeholders.json`（filter `type=="scan"` 且 `status=="pending"`）来决定替换哪些扫描件，**不扫正文猜匹配**；不登记 = 下游不会替换该占位符。
+**每写一个扫描件占位符，必须用权威脚本同步登记**（禁止手写 python/jq 改 JSON）：
 
-每条 scan item 字段：
+```bash
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py register \
+  --id <material-type> --type scan --material-type <material-type> \
+  --source-file <当前正在写的响应文件名>
+```
+
+脚本自动完成：幂等 upsert + `source_file` 归一化为工作目录根相对路径（如 `响应文件/00-资格证明文件合集.md`）。下游 `bid-material-search` 只读 `placeholders.json`（filter `type=="scan"` 且 `status=="pending"`）来决定替换哪些扫描件，**不扫正文猜匹配**；不登记 = 下游不会替换该占位符。
+
+每条 scan item 字段（脚本生成）：
 ```json
 { "id": "business-license", "type": "scan", "material_type": "business-license",
-  "source_file": "00-资格证明文件合集.md", "status": "pending", "asset": null }
+  "source_file": "响应文件/00-资格证明文件合集.md", "status": "pending", "asset": null }
 ```
 - `id` = 材料类型码（**与占位符文本里的 `<material-type>` 完全一致**；多份时带序号，如 `performance-contract-1`），是唯一连接键，下游按它在 `source_file` 精确定位 `【此处插入:扫描件:<material-type>】`
 - `material_type` = 该材料的类型码（与 `id` 同值，便于下游按材料类型检索 MaterialHub）
-- `source_file` = **当前正在写的响应文件名**（如 `00-资格证明文件合集.md`），下游用它定位占位符所在文件
-- 按 `id` 幂等 upsert（同一类型码在多文件出现只登记一条，`source_file` 取该 id 首次写入的文件；多份时每个带序号的 id 各登记一条）；`placeholders.json` 不存在时先建 `{ "version": 1, "items": [] }`
+- `source_file` = **工作目录根相对路径**（脚本自动归一化，禁止裸文件名）
+- 按 `id` 幂等 upsert（同一类型码在多文件出现只登记一条，`source_file` 取该 id 首次写入的文件；多份时每个带序号的 id 各登记一条）
 - **本步只登记 `type:"scan"`**；截图（`screenshot`）和图表（`diagram`）由 bid-tech-proposal 登记，不得混登
 
 #### 自检
 
-写完正文并登记对照表后，执行：
+写完正文并登记对照表后，执行权威闭环校验：
 ```bash
-# 1. 正文中的扫描件占位符数量
-echo "正文扫描件占位数: $(grep -c '此处插入:扫描件:' 响应文件/*.md)"
-# 2. 对照表里 scan pending 数量
-echo "对照表 scan pending: $(jq '[.items[] | select(.type=="scan" and .status=="pending")] | length' placeholders.json)"
-# 3. 残留的无 id 旧格式 / 中文材料名当 id / 加粗占位符（命中数应为 0）
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py validate
+```
+- 退出码必须为 0；🔴 项（未登记的正文占位符、表与正文漂移、asset 缺失）逐项修复后重跑
+- 另查残留旧格式（命中数应为 0）：
+```bash
 grep -nP '【此处插入[^:]*扫描件】|【此处(展示|暂留|预留|添加|生成):?扫描件|\*\*【?此处插入' 响应文件/*.md
 ```
-- 自检 1 与自检 2 必须相等；正文每个扫描件占位符的类型码都应能在对照表找到对应 item（漏预留或漏登记都会导致下游不替换）
-- 自检 3 命中行必须改回 `【此处插入:扫描件:<material-type>】` 标准格式并登记对照表
+- 命中行必须改回 `【此处插入:扫描件:<material-type>】` 标准格式并用 register 登记
 
 ### 4. 占位符汇总
 

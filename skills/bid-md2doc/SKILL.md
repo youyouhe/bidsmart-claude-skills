@@ -6,6 +6,7 @@ description: >
   通过 generate_docx 工具（结构化参数）生成 Word 文件。
   当用户要求生成Word文档、转换MD为docx、导出响应文件时触发。
   前置条件：响应文件/ 目录下已有编写完成的 .md 文件。
+requires: [node:docx(主路径), docscan(可选增强)]
 ---
 
 # MD 转 Word 文档
@@ -348,9 +349,21 @@ generate_docx.js 在以下情况插入分页符：
 - 如果生成失败，检查控制台错误信息并修复（常见：图片路径错误、特殊字符导致表格解析失败）
 - **Word 文件被占用时写入会失败**（EBUSY 错误）：生成前确保目标 .docx 文件未在 Word 中打开
 
+### 5. 产物回验（强制，报告结果前必跑）
+
+生成（含 DocScan 增强下载覆盖）之后、输出完成状态之前，必须对每个产出的 docx 跑机器回验：
+
+```bash
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/verify_docx.py <docx路径>
+```
+
+- **退出码非 0（🔴）**：占位符残留 / 图片未嵌入 / docx 非法——**不得宣称完成**，先回退修复转换路径（典型：降级到不嵌图的在线转换时，必须改回 generate_docx 主路径或手工补图后重新生成）。
+- **🟡 警告**：写入完成状态的"产物回验"行，不得静默吞掉。
+- 该脚本同时兜底了"39KB docx 冒充整本标书"类事故（文本量/图片数与源 md 比对）。
+
 ## 完成状态
 
-生成完成后，输出以下结构化状态摘要：
+生成完成且**产物回验通过后**，输出以下结构化状态摘要：
 
 ```
 --- BID-MD2DOC COMPLETE ---
@@ -363,6 +376,9 @@ MD文件数: {N}
 DocScan后期增强: {SUCCESS / SKIPPED_OFFLINE / PARTIAL}
 交叉引用: {成功数}/{总数}
 占位符残留: {N}个
-状态: SUCCESS
+产物回验: {PASS / PASS_WITH_WARNINGS(明细)}
+状态: {SUCCESS / FAILED}
 --- END ---
 ```
+
+> 占位符残留 > 0 或产物回验 🔴 时，状态必须 FAILED，禁止输出 SUCCESS。

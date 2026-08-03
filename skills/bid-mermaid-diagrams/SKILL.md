@@ -12,6 +12,7 @@ description: >
   架构图/流程图/时序图/数据流图/状态机默认改用内置的 archify 渲染引擎，
   效果更专业；甘特图和 ER 图 archify 不支持，仍走 Mermaid+mmdc 路径。
   当用户要求画图、生成图表、替换图表占位符、为技术方案/实施方案画架构图时触发。
+requires: [archify(主路径), mmdc+puppeteer(甘特/ER及兜底路径)]
 ---
 
 # Mermaid 图表生成与渲染
@@ -58,10 +59,11 @@ curl http://127.0.0.1:18800/health
 检查 `响应文件/` 目录下是否存在包含图表占位符的 `.md` 文件（由 `bid-tech-proposal`/`bid-commercial-proposal` 生成），以及工作目录根是否有 `placeholders.json`：
 
 ```bash
-ls placeholders.json 2>/dev/null
-jq '[.items[] | select(.type=="diagram" and .status=="pending")] | length' placeholders.json 2>/dev/null
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py normalize
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py stats
 grep -rl "【此处插入.*图】" 响应文件/*.md 2>/dev/null
 ```
+`source_file` 一律为**工作目录根相对路径**（normalize 已保证），直接打开，禁止自行拼接目录前缀。
 
 - **有 `placeholders.json` 且 diagram pending > 0** → 走 §1a 主路径（对照表查表）
 - **无 `placeholders.json` / diagram pending 为 0，但 legacy grep 有匹配文件** → 走 §1b legacy 兜底扫描
@@ -334,7 +336,10 @@ python3 scripts/watermark.py --auto-project-name diagram.png -o diagram.png
 
 **对照表主路径（§1a）的替换目标与回填**：
 - 替换目标 = `【此处插入:图表:<item.id>】`（由 item.id 精确定位），替换为 `![<item.title 或 描述>](diagram-<item.id>.png)`。
-- 替换后**回填 placeholders.json**：该 item `status="done"`，`asset=<png 相对路径>`（相对工作目录根，如 `响应文件/diagram-sys-arch.png`）。按 id 幂等更新。
+- 替换后**回填 placeholders.json（用权威脚本，禁止手改 JSON）**：
+  ```bash
+  python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py mark-done --id <item.id> --asset <png 路径>
+  ```
 - 渲染失败 / 占位符定位失败 → **保留占位符不动，item 维持 `pending`（不伪造 done、不回填 asset）**，供 bid-assembly 闭环标红。
 
 **legacy 兜底（§1b）的替换目标** = `【此处插入XX图】`（无 id），按下方"操作步骤"替换为 `![XX图](diagram-XX.png)`；**不写回 placeholders.json**。

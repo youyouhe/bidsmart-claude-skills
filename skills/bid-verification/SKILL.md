@@ -4,6 +4,7 @@ description: >
   对招标文件分析报告进行逐项核实，与原始采购文件交叉验证每一个关键数据点。
   检查分析报告中的金额、分值、资格条件、时间节点、评分规则等是否与原文一致，
   识别幻觉数据、遗漏信息、数值错误。当用户要求核实/校验/审核分析报告时触发。
+requires: [python:docx]
 ---
 
 # 招标分析核实
@@ -370,6 +371,25 @@ for ti, table in enumerate(doc.tables):
 | 已自动修正 | 统计"错误清单"中实际已回写进分析报告的条目数，而非"错误清单"总行数（有些 ❌ 项可能因需人工判断而未自动修正） |
 
 **执行顺序**：先完成核实报告全文（含逐项核实明细、推断沿用检测） → 再对上表逐项计数 → 最后填入下方摘要模板。
+
+### 统计 JSON 块（强制，报告末尾）
+
+核实报告**末尾必须嵌入统计 JSON 块**，数字由脚本从"逐项核实明细"计数生成，**禁止手写**：
+
+```bash
+# 写完正文后：生成统计块并追加到报告末尾
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/report_stats.py fill 核实报告.md --kind verification >> 核实报告.md
+# 自检：统计块与明细不一致则退出码 1，必须修正
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/report_stats.py check-report 核实报告.md
+```
+
+- correct/wrong/suspect/notfound = 明细表中 `| ✅` / `| ❌` / `| ⚠️` / `| 🔍` 行计数（脚本权威），四者之和必须等于 `total_items`
+- 历史事故：核实报告摘要曾手写 31 项（明细实际 63 项）——此后统计数字只认脚本产物
+- 同时复核分析报告末尾的统计块：
+  ```bash
+  python3 $SKILLS_BASE_PATH/bid-manager/scripts/report_stats.py check-report 分析报告.md
+  ```
+  不一致按 ❌ 错误记入核实明细。
 
 核实完成后，输出以下结构化状态摘要：
 

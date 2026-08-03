@@ -6,6 +6,7 @@ description: >
   技术标→需求规格→原型生成→图表→原型截图→扫描件→质检→自动修复→生成Word。
   当用户要求一键投标、全流程投标、管理投标进度、继续投标流程时触发。
   前置条件：需要有招标/磋商/采购文件。
+requires: [python3(门禁/回验/统计脚本), docscan(S0必需)]
 ---
 
 # 投标全流程管理器
@@ -78,13 +79,20 @@ S0:前置检查 → S1:分析 → S2:核实 → S3:系统分解 → S4:信息收
     "_source": {
       "name": "from_materialhub",
       "credit_code": "from_materialhub",
+
       "legal_person": "from_materialhub",
       "bid_price": "user_input"
     }
   },
-  "fix_rounds": 0
+  "fix_rounds": 0,
+  "audit_decisions": { "status": "pending" }
 }
 ```
+
+> `audit_decisions` 是风险审计门禁的状态位（`pending` → `resolved`），**只允许通过
+> `$SKILLS_BASE_PATH/bid-manager/scripts/check_gate.py resolve-audit` 写入**（脚本会校验
+> `响应文件/决策清单.json` 存在）；S13/S14 入口必须跑 `check_gate.py check s13|s14`，
+> 退出码非 0 禁止进入。详见下方「风险审计门禁」节。
 
 ### 进度文件校验（读取后必做）
 
@@ -161,14 +169,20 @@ S0:前置检查 → S1:分析 → S2:核实 → S3:系统分解 → S4:信息收
 curl -s -m 5 http://localhost:3000/api/v1/health/preflight
 ```
 
-返回 JSON 关键字段：`overall`（`ready` / `partial` / `not_ready`）、`services`（逐项服务状态，含 `required` 和 `affectedStages`）、`recommendations`（人类可读的逐项说明）。
+返回 JSON 关键字段：`overall`（`ready` / `partial` / `not_ready`）、`services`（逐项服务状态，含 `required` 和 `affectedStages`）、`environment`（沙箱环境工具能力级探测：`jq` / `mmdc` / `python:docx` / `python:fitz` / `python:pdfplumber` / `node:docx`，每项含 `affectedStages`）、`recommendations`（人类可读的逐项说明）。
 
 处理规则：
 
 - **`ready`** → 直接输出一行"✅ 前置检查通过"，进入 S1
-- **`partial`** → 必需服务正常，可选服务（archify 图表渲染 / MaterialHub / Puppeteer 等）不可用：向用户列出 `recommendations` 及受影响阶段，确认后继续；AUTO_MODE 下输出警告并继续（对应阶段自身有降级逻辑）
+- **`partial`** → 必需服务正常，可选服务或环境工具不可用：向用户列出 `recommendations` 及受影响阶段，确认后继续；AUTO_MODE 下输出警告并继续
 - **`not_ready`** → 必需服务（DocScan、DeepSeek API Key）不可用：**停止整个流程，不进入 S1**。完整列出 `recommendations`，提示用户修复后重新发起"一键投标"
 - **接口本身无法连接**（curl 失败/超时/非 JSON 响应）→ 不阻塞，输出一行警告（"前置检查接口不可用，跳过检查"）后继续。可能是 API 未部署该端点或端口不同，各阶段自身的错误处理会兜底
+
+**降级决策必须基于实测，禁止假设兜底可用**：preflight 的探活是**能力级**的（Chrome 是真实执行 `--version`，archify 是真实渲染一张最小图），因此：
+
+- `environment` 中某工具 `missing` → 其 `affectedStages` 列出的阶段**在到达时就必须按已知的缺失做降级**，不得等到了该阶段现试现发现（历史事故：pdfplumber/jq/node:docx 缺失都是执行到当阶段才发现；S0 宣称"Mermaid 兜底"但 mmdc 依赖的 Chrome 根本没装，S9 双路全断）
+- 典型映射：`puppeteer` down → S9(mmdc 兜底路径)+S10 均不可用，S9 只能用 archify 主路径、S10 标 SKIPPED；`archify` down → S9 只能走 mmdc（且需 puppeteer ok），两者都 down → S9 整体标 FAILED 并保留占位符，**不得宣称有兜底**；`node:docx` missing → S14 只能走 DocScan 降级路径（且不嵌图，产物回验会 🔴，应提前告知用户）；`python:pdfplumber` missing → S1 用 PyMuPDF 路径
+- 各 skill 头部 frontmatter 有 `requires:` 声明其环境依赖，与 preflight `environment` 的 `name` 一一对应
 
 **系统时钟校验（强制门禁，独立于上面的健康接口）**：
 
@@ -400,7 +414,16 @@ date +%Y    # 取系统当前年份
 - 执行 bid-audit，产出 `审计报告.md` 与 `决策清单.json`。
 - **暂停等待用户裁决**（继 S3 之后的第二个用户决策点，故意覆盖 AUTO_MODE 的自动推进）：把 `决策清单.json` 逐条呈现给用户，每条选：补证据入库 / 改述为合规表述（如"集成第三方资源"）/ 接受风险继续 / 放弃投标。
 - 用户标记"需修复"的条目合并进 S13 修复输入（与 S12 的 red/yellow issues 一并修复）。
-- 全部裁决后方可进入 S13；修复完成后再生成 Word（S14）。
+- **收到逐条裁决后**，运行硬校验脚本落状态位：
+  ```bash
+  python3 $SKILLS_BASE_PATH/bid-manager/scripts/check_gate.py resolve-audit --note "用户已逐条裁决 N 条决策"
+  ```
+- **🚫 硬门禁（不再有例外）**：进入 S13 和 S14 前必须分别运行入口检查，退出码非 0 时**禁止进入该阶段**，只能回到用户裁决：
+  ```bash
+  python3 $SKILLS_BASE_PATH/bid-manager/scripts/check_gate.py check s13   # 进 S13 前
+  python3 $SKILLS_BASE_PATH/bid-manager/scripts/check_gate.py check s14   # 进 S14 前（额外校验 S12 已执行 + 占位符闭环自洽）
+  ```
+  **"用户说了先完成编写/继续/按规则来"等笼统授权不构成逐条裁决**——除非用户在 S4 或裁决点明确说过"审计决策全部按接受风险处理"之类的话，否则不得代用户 resolve。历史教训：agent 曾用"鉴于您已授权先完成编写"一句话放行 9 条未裁决决策直接生成 Word。
 
 ### S13: 自动修复（最多2轮）
 
@@ -408,6 +431,7 @@ date +%Y    # 取系统当前年份
 输入: 核对报告.md 中的 ASSEMBLY_SUMMARY JSON
 输出: 修复后的 响应文件/*.md
 调用: bid-tech-proposal / bid-commercial-proposal（修复模式）
+入口检查: python3 $SKILLS_BASE_PATH/bid-manager/scripts/check_gate.py check s13（FAIL 禁止进入）
 ```
 
 修复循环：
@@ -418,7 +442,7 @@ date +%Y    # 取系统当前年份
    - `bid-commercial-proposal` 类问题 → 调用 bid-commercial-proposal 修复模式
 3. 修复完成后，重新执行 S12 质检
 4. 如果仍有 🔴 问题且修复轮次 < 2，再次修复
-5. 如果修复轮次 >= 2 仍有问题，输出剩余问题清单，建议人工处理
+5. 如果修复轮次 >= 2 仍有问题，输出剩余问题清单，建议人工处理；**这些剩余项必须同步进入最终完成状态的"待处理阻塞项"**，状态按分级表取 `SUCCESS_WITH_BLOCKERS`，不得静默收尾
 6. 更新 `pipeline_progress.json` 中的 `fix_rounds`
 
 ### S14: 生成Word
@@ -427,9 +451,11 @@ date +%Y    # 取系统当前年份
 输入: 响应文件/*.md
 输出: 响应文件/响应文件-{公司}-{项目}.docx
 调用: bid-md2doc
+入口检查: python3 $SKILLS_BASE_PATH/bid-manager/scripts/check_gate.py check s14（FAIL 禁止进入）
 ```
 
-- 执行 bid-md2doc 完整流程
+- 执行 bid-md2doc 完整流程（其内部含产物回验强制步骤）
+- bid-md2doc 返回 FAILED（产物回验 🔴 / 占位符残留 > 0）→ 本阶段标 `failed`，**不得带着坏产物进最终汇总**
 - 报告最终文件路径和大小
 
 ## 进度展示
@@ -496,10 +522,23 @@ date +%Y    # 取系统当前年份
 项目名称: {项目名称}
 公司名称: {公司名称}
 报价金额: {金额}
-完成阶段: S1-S14
+完成阶段: S1-S14（FAILED/SKIPPED 阶段逐个列出: {Sx:failed原因, Sy:skipped原因}）
 修复轮次: {N}
 输出文件: {docx文件路径}
 文件大小: {KB}
-状态: SUCCESS
+产物回验: {PASS / PASS_WITH_WARNINGS(明细) / FAILED(明细)}
+待处理阻塞项: {N}（mock 材料待替换 N 份 / 决策未裁决 N 条 / 占位符未替换 N 处，逐项列出）
+状态: {SUCCESS / SUCCESS_WITH_BLOCKERS / FAILED}
 --- END ---
 ```
+
+**状态分级（强制，按最高严重级取值，不得就低）：**
+
+| 状态 | 条件 |
+|------|------|
+| `SUCCESS` | 全部 15 阶段 ✅，产物回验 PASS，无 mock 待替换材料，无未替换占位符，无未裁决决策 |
+| `SUCCESS_WITH_BLOCKERS` | docx 已产出且产物回验通过，但存在：mock 材料待替换 / 占位符未替换 / S9-S11 环境性 FAILED·SKIPPED / 审计决策为"接受风险继续"。**阻塞项必须逐条列在"待处理阻塞项"** |
+| `FAILED` | 任何必需阶段（S0-S8、S12-S14）FAILED，或产物回验 🔴，或 docx 未产出 |
+
+- 历史教训：S9 failed + S10 skipped + 14 份 mock 未替换 + 9 条决策未裁决的运行曾自报裸 `SUCCESS`——此后一律按上表分级，`SUCCESS_WITH_BLOCKERS` 必须列明阻塞项，不得用"占位性质标书"等措辞在对联里对冲。
+- `完成阶段` 行不得只写 `S1-S14` 一笔带过——FAILED/SKIPPED 的阶段必须带原因逐个列出（对应「完成度门禁与诚实性」节的 ❌ 标红规则）。

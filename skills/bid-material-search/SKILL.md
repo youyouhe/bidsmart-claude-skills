@@ -7,6 +7,7 @@ description: >
   或替换响应文件中的【此处插入XX扫描件】占位符时触发。
   前置条件：MaterialHub API 服务已运行（通过 .mcp.json 配置），材料已上传到 MaterialHub。
 version: 3.0.0
+requires: [materialhub]
 ---
 
 # bid-material-search Skill (MCP重构版)
@@ -91,7 +92,7 @@ MaterialHub 目前配置为 mock 数据（出于用户隐私考虑，暂未接�
    ```
    `requirementText` **必须是原文摘录**，不要每次用不同措辞转述同一条要求——MaterialHub 按 `entityName`+`docTypeCode`+`requirementText` 做幂等判断，措辞不一致会导致重复生成多份材料。
 5. **登记 `mock_materials_registry.json`**（与 `placeholders.json` 同级，schema 见 `packages/bidsmart-skills/CLAUDE.md` "Mock materials registry" 段）：append 一条 item，记录 `document_id`、`doc_type_code`、`entity_name`、`requirement_text`、对应的 `placeholder_id`。
-6. **占位符替换后标记来源**：该占位符在 `placeholders.json` 中对应 item 除了正常的 `status="done"` + `asset=<路径>`，额外加 `is_mock_pending_replacement: true`，与"真实材料替换完成"区分。
+6. **占位符替换后标记来源**：回填时用 `placeholder_registry.py mark-done --id <id> --asset <路径> --mock`，脚本自动附加 `is_mock_pending_replacement: true`，与"真实材料替换完成"区分。
 7. **即时告知用户（不阻塞，AUTO_MODE 和交互模式一致）**：生成成功后立即在输出中提示一句，例如"⚠️ 已为『XX认证』生成临时材料（MaterialHub 暂无真实资料），标书完成后需替换为真实证书"。**不要等到最终汇总才第一次提及**——每生成一份就当场提一句，累计到完成状态块时再汇总一次数量。
 8. **仍生成失败**（类型不存在、服务不可用、Hub 返回错误）→ 回退到阴性结果规则：占位符列入"未替换占位符清单"，不伪造完成。
 
@@ -242,8 +243,9 @@ data = extract_person_data_sync("周杨")
 **前置检查（主路径专用，替换前必须先执行）**：
 
 ```bash
-# 1. 工作目录根 placeholders.json 是否存在 type==scan 的 pending item
-jq '[.items[] | select(.type=="scan" and .status=="pending")] | length' placeholders.json 2>/dev/null
+# 0. 归一化旧表 + 确认有 scan pending item（source_file 一律为工作目录根相对路径，直接打开，禁止自行拼接目录前缀）
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py normalize
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py stats
 # 2. MaterialHub 在线（参见上文「服务可用性检测」）
 curl -s -o /dev/null -w "%{http_code}" http://localhost:8201/health
 ```
@@ -271,17 +273,20 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8201/health
 
    `<材料名>` 取材料的 `title`（或 doc_type 中文名 + 实体名）。
 6. **MaterialHub 无此材料** → **保留占位符不动**，item 维持 `pending`（供 bid-assembly §5.6 闭环标红、供用户手工补），**不伪造 done、不擅自插无关材料**。"MaterialHub 不可用/无数据时不得假装完成" 是本 skill 不可让步的原则。
-7. **回填 placeholders.json**：成功替换的 item `status="done"`、`asset=<图相对路径>`（相对工作目录根，如 `响应文件/material-business-license.png`），按 `id` 幂等更新。
+7. **回填 placeholders.json（用权威脚本，禁止手改 JSON）**：
+   ```bash
+   # 真实材料：
+   python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py mark-done --id <item.id> --asset <图路径>
+   # mock 临时材料（自动附加 is_mock_pending_replacement 标记）：
+   python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py mark-done --id <item.id> --asset <图路径> --mock
+   ```
 
 **自检（主路径收尾必跑）**：
 
 ```bash
-# (a) 列出已 done 的 scan item 的 id，逐个核对 source_file 中对应 id 的占位符应已替换、不得残留
-jq -r '.items[] | select(.type=="scan" and .status=="done") | .id' placeholders.json
-# 对每个 id：grep -c "【此处插入:扫描件:<id>】" <source_file> 应为 0
-# (b) 查不到材料的 item 应维持 pending（不应伪造 done）
-jq '[.items[] | select(.type=="scan" and .status=="pending")] | length' placeholders.json
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py validate
 ```
+- 退出码必须为 0。"已标 done 但正文占位符残留"（🟡）说明标 done 前未替换正文，必须回查；"查不到材料的 item 维持 pending" 是合法状态，不计错误。
 
 已查到材料并替换的 item 在 source_file 中**不得残留** `【此处插入:扫描件:<id>】`；查不到材料的 item **维持 pending**（不伪造 done），供 bid-assembly（S12 质检）§5.6 闭环标红。
 
