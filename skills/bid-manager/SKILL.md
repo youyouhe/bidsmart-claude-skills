@@ -247,10 +247,18 @@ date +%Y    # 取系统当前年份
 1. 用平台提供的 `material_hub_search` / `material_hub_list_entities` / `material_hub_entity_documents` 工具实际查询（不是"想起来了"而是必须执行）：
    ```
    material_hub_entity_documents(entityName: "<公司名>")
+   material_hub_mock_pending_list()   # 必查：待替换 mock 清单
    ```
+   - `material_hub_mock_pending_list` **与 entity_documents 并列必查**——两者数据源不同（entity_documents 走实体关联，pending_list 走 mock_reason 标记），历史事故：mock 生成接口未建立实体关联，entity_documents 返回 0 而库里实际已有 16 份 mock，agent 误判"材料 0 份"向用户重复发问卷。**entity_documents 为 0 但 pending_list 有货时，以 pending_list 为准**，把已有 mock 材料展示给用户并询问"复用 / 重新生成 / 提供真实材料"。
    查不到候选公司时，先用 `material_hub_list_entities(entityType: "org")` 看库中有哪些公司，向用户确认本次投标主体后再查。
    🔒 密钥与地址由平台服务端持有，agent **无需也不应接触任何 key/地址**——不要用 `bash`/`curl` 拼 `$MATERIALHUB_API_KEY`/`$MATERIALHUB_API_URL`（沙箱 env 已无密钥，裸 curl 只会带空 token 出去，白白多一次失败请求；且这类指令本身是不该存在的坏样例）。所有查询走上述工具，不经过 bash。
 2. 只有以下情况才允许直接向用户发问卷：(a) 工具返回服务不可用/连接失败；(b) 库中查无此公司/此类材料。且问卷开头必须注明"已尝试查询资料库：未命中（原因）"。
+
+**实体存在但材料为 0（或远不够）时，问卷必须提供"全部 mock"显式默认选项**：这种中间态不属于下方"完全查无"的自动放行场景，必须问用户，但问法要给出低成本选项——在问卷开头列出：
+
+> **快速通道**：回复"全部 mock"= 授权本次投标所有缺失材料（资质/业绩/人员/扫描件）一律按需生成 mock 占位，标书完成后人工替换为真实材料（废标风险已告知）。逐项提供真实材料则忽略本项。
+
+用户回复"全部 mock"（或同义表述）即构成对**所有缺失材料**的统一授权，按下方 `mock_grant` 规则落盘后，本流水线后续阶段不得再就材料缺失逐项追问。
 
 **公司实体完全查无时（不是缺某份材料，是整个投标主体在 MaterialHub 中都不存在）**：允许连公司基础档案（营业执照等）一起按需 mock 占位，不需要在生成前停下来等用户批准（与下方材料级 mock 生成保持同一交互原则——不阻塞，生成后立即告知）。触发方式：确认本次投标主体名称（用户指定，或从库中已有候选选择）后，若该名称在 MaterialHub 中完全查无，交由 bid-material-search 的 `material_hub_mock_generate` 工具生成营业执照等基础材料；生成后照常登记 `mock_materials_registry.json`，并在本轮输出中提示用户"本次投标主体在资料库中未找到，已生成临时基础档案，标书完成后需替换为真实材料"。
 
@@ -264,6 +272,22 @@ date +%Y    # 取系统当前年份
 6. **报价决策**：报价金额**必须用户确认，不可自动决定，也不可用 MaterialHub 中任何历史数据代替**
 
 收集完成后，将所有信息写入 `pipeline_progress.json` 的 `company_info` 字段，并标注每项信息的来源（`from_materialhub` 或 `user_input`），供 S5/S6 阶段和后续审计参考。
+
+**mock 授权落盘（`mock_grant`，断点续跑/后续阶段继承的依据）**：用户在 S4（或任何阶段）明确授权使用 mock 材料后，必须写入 `pipeline_progress.json`：
+
+```json
+"mock_grant": {
+  "scope": "all_missing",
+  "granted_by": "user",
+  "granted_at": "<ISO 时间>",
+  "note": "用户授权所有缺失材料按需 mock 占位，完成后人工替换"
+}
+```
+
+- `scope: "all_missing"` = 全部缺失材料统一授权（用户回复"全部 mock"/"使用mock资料"等同义表述时）；用户只对单项授权的，用 `scope: ["doc_type_code", ...]` 逐项列出
+- **下游继承**：S5/S6/S11 及 bid-material-search 在任何"missing → 是否 mock"的决策点，先读 `pipeline_progress.json` 的 `mock_grant`——命中授权范围则直接生成，**不再暂停询问**；未命中才按各自 skill 的默认规则问用户
+- 授权只豁免"是否生成"的追问，**不豁免告知义务**：每次实际生成 mock 后照常登记 `mock_materials_registry.json` 并在阶段摘要报告"本次生成 N 份待替换材料"
+- 新对话/断点续跑时，只要工作目录的 `pipeline_progress.json` 存在 `mock_grant`，即视为授权仍然有效，不得重新发问
 
 ### 投标策略决策（S4→S5 之间，标书级单点决策）
 
