@@ -74,19 +74,22 @@ def main() -> int:
         if n:
             reds.append(f"占位符残留: {ph} ×{n}")
 
-    # 3/4. 与源 md 比对
+    # 3/4. 与源 md 比对。图片数按 basename 去重——同一图片在多 md 或同 md 多处引用
+    # 都只算 1 张（Word media 也只存 1 份），否则引用次数 > media 文件数必然误报红。
     md_files = sorted(root.glob(args.source_glob))
-    md_imgs = 0
+    md_img_set = set()
     md_chars = 0
     for md in md_files:
         content = md.read_text(encoding="utf-8", errors="ignore")
         md_chars += len(content)
-        md_imgs += len(IMG_REF_RE.findall(content))
+        for ref in IMG_REF_RE.findall(content):
+            md_img_set.add(ref.split("/")[-1])
+    md_imgs = len(md_img_set)
 
     if md_files:
         if md_imgs > 0 and len(media) < md_imgs:
             reds.append(
-                f"图片未全部嵌入: 源 md 引用 {md_imgs} 张，docx word/media/ 仅 {len(media)} 个文件"
+                f"图片未全部嵌入: 源 md 引用 {md_imgs} 张（去重后唯一），docx word/media/ 仅 {len(media)} 个文件"
                 "（疑似走了不嵌图的降级转换路径）"
             )
         ratio = (len(text) / md_chars) if md_chars else 0
