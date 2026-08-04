@@ -909,6 +909,11 @@ python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py register \
 
 ##### 自检
 
+**自检方法论（避免临场 grep 出错中断流程）**：
+- **权威脚本为准**：占位符闭环以 `placeholder_registry.py validate` 的退出码为准（🔴 才是真问题）。下方裸 `grep` 命令只作辅助计数/定位，**不是判定准绳**——它报 0 或报错不等于内容有错。
+- **临场写 grep 的注意**：固定字符串（含 `【】`、中文、`:`）一律用 `grep -F`（固定字符串模式），避免 `【】` `|` `()` 等被正则引擎当特殊字符；只有真正需要正则时才用 `-E`/`-P` 并注意转义。
+- **grep 报错 ≠ 内容有错**：临场 grep 正则写错或命令失败时，**只重跑该条命令**（修正正则或换 `-F`），**不要中断流程、不要怀疑已写好的正文**。内容正确性由权威脚本 validate 保证，不由临场 grep 保证。（事故记录：S6 自检时临场 grep 正则写错，误以为内容有问题而中断流程，实际内容完全正确，浪费一轮。）
+
 写完正文并登记对照表后，执行权威闭环校验：
 ```bash
 python3 $SKILLS_BASE_PATH/bid-manager/scripts/placeholder_registry.py validate
