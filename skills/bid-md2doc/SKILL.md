@@ -357,6 +357,13 @@ generate_docx.js 在以下情况插入分页符：
 python3 $SKILLS_BASE_PATH/bid-manager/scripts/verify_docx.py <docx路径>
 ```
 
+**多册输出必须按册传 `--source-glob`**（只比该册源 md）：单本 docx 若用默认全目录 glob，其他册的图算进分母必然误报"图片未全部嵌入"。`--source-glob` 支持多个 pattern 精确覆盖不连续的册（如商务技术册 = 01 + 05-18）：
+```bash
+python3 $SKILLS_BASE_PATH/bid-manager/scripts/verify_docx.py "输出/投标文件（商务技术文件）.docx" \
+  --source-glob "响应文件/01-*.md" "响应文件/0[5-9]-*.md" "响应文件/1[0-8]-*.md"
+```
+脚本内部已对源 md 图片按 basename 去重（同图多处引用只算 1 张），与 Word media 去重一致——无需担心册内重复引用误报。
+
 - **退出码非 0（🔴）**：占位符残留 / 图片未嵌入 / docx 非法——**不得宣称完成**，先回退修复转换路径（典型：降级到不嵌图的在线转换时，必须改回 generate_docx 主路径或手工补图后重新生成）。
 - **🟡 警告**：写入完成状态的"产物回验"行，不得静默吞掉。
 - 该脚本同时兜底了"39KB docx 冒充整本标书"类事故（文本量/图片数与源 md 比对）。
