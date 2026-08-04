@@ -184,6 +184,13 @@ curl -s -m 5 http://localhost:3000/api/v1/health/preflight
 - 典型映射：`puppeteer` down → S9(mmdc 兜底路径)+S10 均不可用，S9 只能用 archify 主路径、S10 标 SKIPPED；`archify` down → S9 只能走 mmdc（且需 puppeteer ok），两者都 down → S9 整体标 FAILED 并保留占位符，**不得宣称有兜底**；`node:docx` missing → S14 只能走 DocScan 降级路径（且不嵌图，产物回验会 🔴，应提前告知用户）；`python:pdfplumber` missing → S1 用 PyMuPDF 路径
 - 各 skill 头部 frontmatter 有 `requires:` 声明其环境依赖，与 preflight `environment` 的 `name` 一一对应
 
+**MaterialHub mock 模式感知（真实资料环境强制项）**：preflight 的 `services` 里 `materialhub` 的 `detail` 末尾带 `| mock: enabled|disabled|unknown`（由 capabilities 探测写入）。读取并记住该模式，它是 S4 行为的前置约束：
+
+- `mock: enabled` → S4 缺失材料可按用户授权（mock_grant）生成占位材料
+- `mock: disabled`（真实资料环境，杜绝真实/mock 混合构成虚假应标）→ **S4 信息收集不得提供"全部 mock"快速通道**；材料缺失一律列入"未替换清单"并向用户收集真实材料；若中途误调 `material_hub_mock_generate` 会收到 `[MOCK_DISABLED]` terminal 错误，处置见 S4 段
+- `mock: unknown`（capabilities 未返回或接口不可达）→ 保守按 `disabled` 处理
+- 模式可能在中途切换：S4 决策点前可复查 `material_hub_capabilities()` 工具确认当前实时值，不依赖 S0 缓存值
+
 **系统时钟校验（强制门禁，独立于上面的健康接口）**：
 
 ```bash
@@ -254,9 +261,13 @@ date +%Y    # 取系统当前年份
    🔒 密钥与地址由平台服务端持有，agent **无需也不应接触任何 key/地址**——不要用 `bash`/`curl` 拼 `$MATERIALHUB_API_KEY`/`$MATERIALHUB_API_URL`（沙箱 env 已无密钥，裸 curl 只会带空 token 出去，白白多一次失败请求；且这类指令本身是不该存在的坏样例）。所有查询走上述工具，不经过 bash。
 2. 只有以下情况才允许直接向用户发问卷：(a) 工具返回服务不可用/连接失败；(b) 库中查无此公司/此类材料。且问卷开头必须注明"已尝试查询资料库：未命中（原因）"。
 
-**实体存在但材料为 0（或远不够）时，问卷必须提供"全部 mock"显式默认选项**：这种中间态不属于下方"完全查无"的自动放行场景，必须问用户，但问法要给出低成本选项——在问卷开头列出：
+**实体存在但材料为 0（或远不够）时，问卷是否提供"全部 mock"显式默认选项取决于 mock 模式**（见 S0 感知项）：这种中间态不属于下方"完全查无"的自动放行场景，必须问用户。
+
+- `mock: enabled` 时，给出低成本选项——在问卷开头列出：
 
 > **快速通道**：回复"全部 mock"= 授权本次投标所有缺失材料（资质/业绩/人员/扫描件）一律按需生成 mock 占位，标书完成后人工替换为真实材料（废标风险已告知）。逐项提供真实材料则忽略本项。
+
+- `mock: disabled` 或 `unknown` 时，**禁止提供"全部 mock"选项**（真实资料环境，杜绝真实/mock 混合）；问卷改为逐项收集真实材料，缺失项列入"未替换清单"，交付状态预期为 `SUCCESS_WITH_BLOCKERS`
 
 用户回复"全部 mock"（或同义表述）即构成对**所有缺失材料**的统一授权，按下方 `mock_grant` 规则落盘后，本流水线后续阶段不得再就材料缺失逐项追问。
 

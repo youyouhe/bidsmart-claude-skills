@@ -95,7 +95,7 @@ MaterialHub 目前配置为 mock 数据（出于用户隐私考虑，暂未接�
 5. **登记 `mock_materials_registry.json`**（与 `placeholders.json` 同级，schema 见 `packages/bidsmart-skills/CLAUDE.md` "Mock materials registry" 段）：append 一条 item，记录 `document_id`、`doc_type_code`、`entity_name`、`requirement_text`、对应的 `placeholder_id`。
 6. **占位符替换后标记来源**：回填时用 `placeholder_registry.py mark-done --id <id> --asset <路径> --mock`，脚本自动附加 `is_mock_pending_replacement: true`，与"真实材料替换完成"区分。
 7. **即时告知用户（不阻塞，AUTO_MODE 和交互模式一致）**：生成成功后立即在输出中提示一句，例如"⚠️ 已为『XX认证』生成临时材料（MaterialHub 暂无真实资料），标书完成后需替换为真实证书"。**不要等到最终汇总才第一次提及**——每生成一份就当场提一句，累计到完成状态块时再汇总一次数量。
-8. **仍生成失败**（类型不存在、服务不可用、Hub 返回错误）→ 回退到阴性结果规则：占位符列入"未替换占位符清单"，不伪造完成。
+8. **仍生成失败**（类型不存在、服务不可用、Hub 返回错误）→ 回退到阴性结果规则：占位符列入"未替换占位符清单"，不伪造完成。**特别注意 `[MOCK_DISABLED]`**：若错误信息以 `[MOCK_DISABLED]` 开头，说明当前是真实资料环境、Hub 已禁用 mock 生成——这是 terminal 硬约束，**禁止重试、禁止改类型码绕过**，直接将该材料列入"未替换占位符清单"并向用户收集真实材料（参考 bid-manager S0 的 mock 模式感知项）。
 
 **这条路径不改变阴性结果规则的记账方式**：Mock 生成成功的占位符不计入 `未替换占位符: N`（它确实被替换了，只是替换的是临时材料），但必须计入 `mock_materials_registry.json` 并在完成状态块单独报告"本次生成 N 份待替换材料"，与"未替换占位符"分开统计，不要混为一谈。
 
