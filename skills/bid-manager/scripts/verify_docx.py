@@ -42,7 +42,9 @@ def extract_docx_text(z: zipfile.ZipFile) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description="S14 最终 Word 产物回验")
     ap.add_argument("docx", help="生成的 .docx 路径")
-    ap.add_argument("--source-glob", default="响应文件/*.md", help="源 md 文件 glob（相对 --root）")
+    ap.add_argument("--source-glob", nargs="+", default=["响应文件/*.md"],
+                    help="源 md 文件 glob（相对 --root，可多个以精确覆盖单册，如商务技术册："
+                         "--source-glob '响应文件/01-*.md' '响应文件/0[5-9]-*.md' '响应文件/1[0-8]-*.md'）")
     ap.add_argument("--root", default=".", help="工作目录根（默认 CWD）")
     args = ap.parse_args()
 
@@ -76,7 +78,7 @@ def main() -> int:
 
     # 3/4. 与源 md 比对。图片数按 basename 去重——同一图片在多 md 或同 md 多处引用
     # 都只算 1 张（Word media 也只存 1 份），否则引用次数 > media 文件数必然误报红。
-    md_files = sorted(root.glob(args.source_glob))
+    md_files = sorted({p for pat in args.source_glob for p in root.glob(pat)})
     md_img_set = set()
     md_chars = 0
     for md in md_files:
