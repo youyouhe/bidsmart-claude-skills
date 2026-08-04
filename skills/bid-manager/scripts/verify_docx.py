@@ -90,7 +90,8 @@ def main() -> int:
         if md_imgs > 0 and len(media) < md_imgs:
             reds.append(
                 f"图片未全部嵌入: 源 md 引用 {md_imgs} 张（去重后唯一），docx word/media/ 仅 {len(media)} 个文件"
-                "（疑似走了不嵌图的降级转换路径）"
+                "（疑似走了不嵌图的降级转换路径）。若此 docx 是多册中的单本，须用 --source-glob 指定"
+                "本册源 md 重校验——用全目录比对单册会因其他册的图算进分母而误报"
             )
         ratio = (len(text) / md_chars) if md_chars else 0
         if ratio < 0.5:
