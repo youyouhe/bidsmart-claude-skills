@@ -152,6 +152,8 @@ read poc/{SXX}-{Name}/index.html
 确认：
 - HTML 结构完整（`<!DOCTYPE html>` → `</html>`）
 - 引用的 `style.css` 和 `script.js` 已生成
+- **script.js 语法（强制）**：`node --check poc/{SXX}-{Name}/script.js` 退出码必须为 0。语法错会让整个脚本失效——`switchTab` 未定义，所有 `onclick="switchTab(...)"` 失效，下游 `screenshot-poc` 截图会全部 reused 默认图（事故：多余的 `)` 致 `Uncaught SyntaxError`，整个系统的功能 tab 截图全是默认界面）。退出码非 0 必须定位修复后再继续
+- **switchTab 全局可用**：`script.js` 里的 `switchTab` 必须是顶层 `function switchTab(){}` 声明（普通 `<script>`，**禁止 `<script type="module">`**——module 作用域的函数不挂 window，onclick 调不到）
 - 没有 `[TODO]`、`[PLACEHOLDER]`、`[待实现]` 残留
 - 所有 P1 功能点有对应的 UI 区域
 - 每个 `<canvas>` 都有固定高度容器包裹（见 1.3 Chart.js 硬约束）
