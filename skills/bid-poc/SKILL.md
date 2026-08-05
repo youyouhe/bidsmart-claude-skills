@@ -189,8 +189,9 @@ AUTO_MODE 下使用统一的设计参数：
 
 - 主色: `#4F46E5` (indigo-600)
 - 辅助色: `#10B981` (emerald-500)
-- 背景: `bg-gray-950` 深色主题
-- 卡片: `bg-gray-900` + `border-gray-800`
+- **浅色主题（light，默认）**：背景 `bg-gray-50`、卡片 `bg-white` + `border-gray-200`
+- 文字色：标题/主文 `text-gray-900`、正文 `text-gray-600`、辅助 `text-gray-400`（禁止用深色主题的 text-gray-100/300/400 当前景——浅底浅字会看不见）
+- 图表（Chart.js）：坐标轴/图例文字色用 `#374151`（gray-700）、网格线 `#e5e7eb`（gray-200），不要再写死深色的 `#9ca3af`
 - 字体: Inter (sans) + JetBrains Mono (mono)
 - 圆角: `rounded-lg` / `rounded-xl`
 - 阴影: `shadow-2xl` 用于模态框
