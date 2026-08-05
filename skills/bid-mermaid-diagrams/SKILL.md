@@ -199,6 +199,9 @@ grep -rl "【此处插入.*图】" 响应文件/*.md 2>/dev/null
 - 节点用 `lane` + `col`（0–5）定位，省略 viewBox（高度自动算）
 - **⚠️ 6 列 x 间距不均**：col 0→1(132)、2→3(130)、4→5(125) 宽松；**col 1↔2(80)、3↔4(70) 太窄**。同一 lane 的连续节点必须用宽松列（如 1,3,5 或 0,2,4），否则 92px 默认节点重叠
 - 默认节点 92×52（有 `tag` 时高 68）；跨 lane 连线用 `route: "drop"`；标签压节点就删 `label`
+- **label 长度硬约束**：默认宽度下单行最多 7 个汉字（全角=2 单位 × 6.8px ≈ 92px）；8~14 字渲染器自动折成两行（会挤占 sublabel 空间，此时避免再配 `tag`）；**>14 字会被 422 拒绝**——必须简化 label、把细节挪到 `sublabel`，或显式设 `node.width`
+- **`mainPath` 只能左→右**：相邻步骤的 col 必须递增（或持平）；循环/退回/驳回路径用普通 edge 表达，**不要放进 mainPath**，否则 422
+- **避免边穿节点（422）**：跨 lane、回退、绕行的边优先用 route preset（`drop` / `return-left` / `bottom-channel` / `up-channel`），别让自动布线直线穿过中间节点
 - `lane.variant: "exception"` 用于异常/重试/失败泳道
 
 #### sequence（时序图）—— participants 顶部排列，message 按 y 递增

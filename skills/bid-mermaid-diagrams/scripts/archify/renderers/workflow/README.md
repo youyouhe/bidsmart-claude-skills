@@ -69,6 +69,7 @@ archify/schemas/workflow.schema.json
 | Exception lanes | Set `lane.variant: "exception"` for retry, denial, fallback, or failure paths |
 | Main path lint | Optional `mainPath[]` checks that happy-path steps have matching edges and do not move backward |
 | Default node | 92×52 (height 68 when `tag` is set) |
+| Label wrapping | Over-wide node labels are auto-split into two unit-balanced lines (CJK-aware); labels too long for two lines still fail validation — shorten them, use `sublabel`, or set `node.width` |
 | Node spacing | ≥8px between nodes in the same lane |
 | Edge length | straight segments must span ≥28px |
 | Legend row | y = lane bottom + 44; viewBox height must be ≥ legend y + 18 |

@@ -61,6 +61,32 @@ function legendY() {
   return lastLaneBottom() + 44;
 }
 
+// Split an over-wide label into two unit-balanced lines that each fit the node
+// width. Returns null when the label fits as-is or is too long for two lines
+// (the validator then reports it with a clear message).
+function wrapLabel(label, width) {
+  const chars = [...String(label ?? '')];
+  if (!chars.length) return null;
+  const units = chars.map((ch) => textUnits(ch));
+  const total = units.reduce((sum, u) => sum + u, 0);
+  if (total * 6.8 <= width + 6) return null;
+  // Same slack the validator allows (width + 6) so wrapped lines always pass.
+  const lineCapacity = Math.floor((width + 6) / 6.8);
+  if (lineCapacity < 2 || total > lineCapacity * 2) return null;
+  let best = null;
+  let acc = 0;
+  for (let i = 0; i < chars.length - 1; i += 1) {
+    acc += units[i];
+    const rest = total - acc;
+    if (acc <= lineCapacity && rest <= lineCapacity) {
+      const imbalance = Math.abs(acc - rest);
+      if (!best || imbalance < best.imbalance) best = { split: i + 1, imbalance };
+    }
+  }
+  if (!best) return null;
+  return [chars.slice(0, best.split).join(''), chars.slice(best.split).join('')];
+}
+
 function measureNode(node) {
   const width = node.width || layout.nodeW;
   const height = node.height || (node.tag ? 68 : layout.nodeH);
@@ -71,6 +97,7 @@ function measureNode(node) {
     ...node,
     width,
     height,
+    labelLines: node.label ? wrapLabel(node.label, width) : null,
     x: cx - width / 2,
     y,
     cx,
@@ -157,9 +184,10 @@ function validateWorkflow() {
       problems.push(`Node "${node.id}" produced non-finite coordinates — check col, width, height, and yOffset are numbers.`);
       continue;
     }
-    const estLabelW = textUnits(node.label) * 6.8;
-    if (estLabelW > node.width + 6) {
-      problems.push(`Label "${node.label}" (~${Math.round(estLabelW)}px) is wider than node "${node.id}" (${node.width}px) — shorten the label, move detail to sublabel, or increase node.width.`);
+    const labelLines = node.labelLines || [node.label];
+    const widest = Math.max(...labelLines.map((line) => textUnits(line) * 6.8));
+    if (widest > node.width + 6) {
+      problems.push(`Label "${node.label}" (~${Math.round(widest)}px) is wider than node "${node.id}" (${node.width}px) even after two-line wrapping — shorten the label, move detail to sublabel, or increase node.width.`);
     }
 
     const top = laneTop(node.lane);
@@ -403,10 +431,15 @@ function renderNode(node) {
   const tag = node.tag
     ? `\n        <text x="${node.cx}" y="${node.y + node.height - 12}" class="${accent}" font-size="7" text-anchor="middle">${esc(node.tag)}</text>`
     : '';
+  const labelText = node.labelLines
+    ? `        <text x="${node.cx}" y="${node.y + 16}" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">${esc(node.labelLines[0])}</text>
+        <text x="${node.cx}" y="${node.y + 29}" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">${esc(node.labelLines[1])}</text>
+        <text x="${node.cx}" y="${node.y + 42}" class="t-muted" font-size="8" text-anchor="middle">${esc(node.sublabel || '')}</text>`
+    : `        <text x="${node.cx}" y="${node.y + 21}" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">${esc(node.label)}</text>
+        <text x="${node.cx}" y="${node.y + 38}" class="t-muted" font-size="8" text-anchor="middle">${esc(node.sublabel || '')}</text>`;
   return `        <rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" rx="6" class="c-mask"/>
         <rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" rx="6" class="${fill}"${animateAttr(workflow.meta, 'node', nodeStep(node))} stroke-width="1.5"/>
-        <text x="${node.cx}" y="${node.y + 21}" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">${esc(node.label)}</text>
-        <text x="${node.cx}" y="${node.y + 38}" class="t-muted" font-size="8" text-anchor="middle">${esc(node.sublabel || '')}</text>${tag}`;
+${labelText}${tag}`;
 }
 
 function renderEdgePath(edge) {
