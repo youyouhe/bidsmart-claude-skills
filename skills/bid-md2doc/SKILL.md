@@ -185,7 +185,7 @@ generate_docx(
 
 **⚠️ DocScan 是一个可选的外部服务。** 此步骤在 DocScan 在线时自动执行，离线时优雅跳过——不影响 generate_docx.js 已产出的 .docx 文件。
 
-**多册模式处理**：步骤 3.1-3.4 对每个 docx 文件逐个执行完整循环（上传→清扫→交叉引用→下载）。每个 docx 独立处理，一个失败不影响其他。
+**多册模式处理**：步骤 3.1-3.4 对每个 docx 文件**严格串行**执行完整循环（上传→清扫→交叉引用→下载→落盘校验）——**一册全部完成（含下载覆盖+落盘校验）后才允许开始下一册，禁止多册交叉并行**。真实事故教训：多册交叉进行时会话中途超时，已完成的 58 次 crossref 因所属册未执行 download 而全部作废，交付文件 0 个页码。处理顺序：**crossref 条目最多的册优先**（响应表所在册通常最重），把最重的册放在会话时间预算最充裕的前段。每个 docx 独立处理，一个失败不影响其他。
 
 #### 3.0 检查 DocScan 可用性
 
@@ -227,6 +227,8 @@ generate_docx(
 这是 DocScan 提供的**独有核心能力**——在正文中标记章节位置，在索引表中插入自动页码字段，经 ONLYOFFICE 重算后填入真实页码。同一机制也用于正文响应表（技术/商务要求响应表）的"报价文件位置页码"类列（见 3.3.4）。
 
 **前置条件**：文档中存在索引表（如 `00-目录.md` 转换后的表格）或 `crossref_mapping.json` 含 `response_crossrefs` 条目；两者皆无则跳过本节。
+
+**⚠️ insertToc 与索引表 crossref 互斥**：若步骤 2 传了 `insertToc=true`，`00-目录.md` 的静态表格已被 TOC 域替代、不存在于 docx 中——`crossref_mapping.json` 的 `crossrefs`（索引表条目）**整体跳过**，只处理 `response_crossrefs`。对不存在的表格做 crossref 必然失败，且每次调用白耗一次 ONLYOFFICE 重算（3-8 秒）。
 
 **页码列的两种策略**：
 
@@ -301,11 +303,27 @@ DocScan 内部自动完成：
 
 回填效果示例：单元格原内容 `3.2 接口设计` → 回填后显示 `3.2 接口设计第4页`（章节锚点+真实页码，评委可直接跳转）。
 
-#### 3.4 下载增强后的 docx
+#### 3.4 下载增强后的 docx + 落盘校验（强制）
 
 调用 `docscan(operation: "download", fid: "<fid>", outputPath: "<outputFile 绝对路径>")` → 下载增强后的 docx，覆盖原始的 generate_docx.js 输出文件，完成增强。
 
-**多册模式**：每个 docx 分别下载覆盖。
+**多册模式**：每个 docx 分别下载覆盖（严格串行，见上文）。
+
+**🚨 落盘校验（每次 download 后必须执行，不得省略）**：crossref 插入的 PAGEREF 域在 docx 里是 `PAGEREF` 指令文本，可直接验证：
+
+```bash
+python3 -c "
+import zipfile, re
+doc = zipfile.ZipFile('<outputFile 绝对路径>').read('word/document.xml').decode('utf-8')
+print(len(re.findall(r'PAGEREF', doc)))
+"
+```
+
+- 本次该册成功的 crossref 数为 N → docx 中 PAGEREF 数必须 **== N**
+- **为 0 或不符 → 增强未落盘**（download 未执行/覆盖错文件/会话中断）：先重新 download 一次；仍不符 → 从 upload 重做该册增强。**禁止带着 0 页码的文档交付，也禁止在完成摘要里虚报交叉引用成功数**
+- 未执行任何 crossref（无索引表且无 response_crossrefs）的册 → 跳过校验
+
+**会话时间预算提醒**：crossref 每次调用触发 ONLYOFFICE 全文字段重算（3-8 秒/次）。单册 crossref 超过 40 条时，仅重算就需 2-5 分钟——务必把 enhance+download 安排在会话前段连续完成，不要在 enhance 中途插入其他耗时操作。
 
 ### 4. 报告生成结果
 
@@ -321,7 +339,7 @@ DocScan 内部自动完成：
 以下文件不转换为 Word（S8 内部产出物，不进入最终交付文档）：
 - `核对报告.md` — 内部质检文件
 - `装订指南.md` — 内部参考文件
-- `00-目录.md` — 目录索引（最终 Word 中的页码由 DocScan crossref 生成）
+- `00-目录.md` — 目录索引（最终 Word 中的页码由 DocScan crossref 生成；**insertToc 模式除外**——该文件须保留在 include 列表中，其位置用于插入目录域，见 2.4 节）
 - `crossref_mapping.json` — S8→S10 数据交换文件，非文档内容
 - 用户指定的其他排除文件
 
@@ -410,7 +428,8 @@ MD文件数: {N}
 图片数: {N}
 排除文件: {核对报告.md, 装订指南.md, ...}
 DocScan后期增强: {SUCCESS / SKIPPED_OFFLINE / PARTIAL}
-交叉引用: {成功数}/{总数}（索引表 {X}/{Y}，响应表 {X}/{Y}；无响应表映射时省略响应表部分）
+交叉引用: {成功数}/{总数}（索引表 {X}/{Y}，响应表 {X}/{Y}；无响应表映射时省略响应表部分；insertToc 时索引表条目跳过不计）
+落盘校验: {通过|失败}（每册 download 后 PAGEREF 数==成功数；失败必须返工，禁止虚报）
 占位符残留: {N}个
 产物回验: {PASS / PASS_WITH_WARNINGS(明细)}
 状态: {SUCCESS / FAILED}
