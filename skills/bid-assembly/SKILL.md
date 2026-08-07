@@ -458,6 +458,17 @@ MaterialHub 目前配置为 mock 数据（出于用户隐私考虑，暂未接�
 2. 在对应的响应文件 markdown 中查找该附件名称的**首次 H2 标题出现**（generate_docx.js 在 H2 前自动分页，该标题一定在新页顶部，是 PAGEREF 的最佳锚点）
 3. 记录 keyword + 对应的 markdown 源文件名
 
+**响应表页码映射（`response_crossrefs`，索引表之外的第二类映射）**：
+
+技术/商务响应表（技术要求响应表、商务要求响应表等）含"报价文件位置页码"/"页码"类列时，proposal skills 已在该列填入锚点章节标题（H2 原文）或特殊值。本步骤追加扫描这些表，生成供 S10 回填页码的映射：
+
+1. **定位响应表**：遍历 `响应文件/[0-9]*.md`（排除内部文件）中的 markdown 表格，表头行**同时**含"页码"（或"位置"）和"响应"（或"偏离"）字样的即响应表
+2. **逐行解析页码列**（列索引从表头确定）：
+   - 值为 `本表` 或空 → 跳过（该行响应自包含，无需跳转）
+   - 值为 `见{册名}` 开头 → 跳过（跨册引用，crossref 无法跨 docx），记入 skipped
+   - 其余值按 `、` 拆分为若干章节引用，逐一在全部响应文件 md 中匹配 H2 标题（`^## ` 行，先精确匹配、再退化包含匹配）→ 命中则标题原文（去掉 `## ` 前缀）作为 keyword；全部未命中 → 记入 skipped
+3. **写入映射**：每条可回填的行生成一条 entry（格式见下方 JSON）
+
 **输出格式**（`响应文件/crossref_mapping.json`）：
 
 ```json
@@ -473,6 +484,18 @@ MaterialHub 目前配置为 mock 数据（出于用户隐私考虑，暂未接�
       "keyword_type": "section_title"
     }
   ],
+  "response_crossrefs": [
+    {
+      "source_file": "15-技术要求响应材料.md",
+      "table_signature": "序号|技术要求|技术要求响应",
+      "row_key": "2",
+      "keywords": ["3.2 接口设计"],
+      "notes": null
+    }
+  ],
+  "response_crossrefs_skipped": [
+    { "source_file": "15-技术要求响应材料.md", "row_key": "1", "reason": "本表自包含 / 跨册引用 / 未找到匹配H2标题" }
+  ],
   "index_table_info": {
     "has_page_column": false,
     "page_column_index": null,
@@ -481,9 +504,15 @@ MaterialHub 目前配置为 mock 数据（出于用户隐私考虑，暂未接�
 }
 ```
 
+**字段说明（response_crossrefs）**：
+- `table_signature`：响应表表头前 3 列以 `|` 连接，供 S10 在 docx 中按表头匹配定位目标表（表序在 pandoc 转换后可能漂移，表头是稳定特征）
+- `row_key`：该行"序号"列的值，供 S10 在表内按序号定位数据行（比行号更抗漂移）
+- `keywords`：解析后的 H2 标题原文列表（锚点），S10 逐个调用 crossref，多个页码按序追加
+
 **容错**：
 - 如果附件名称在对应文件中找不到匹配的标题 → 记录 `keyword: null` + `notes: "未找到匹配标题"`
 - 如果 `00-目录.md` 解析失败或目录表结构异常 → 仍生成 JSON，但 `crossrefs: []`, `skipped: true`, `reason: "..."`
+- 全部响应文件均无响应表（无页码类列）→ `response_crossrefs: []`，属正常情况，不是错误
 
 #### 6.3 装订指南.md
 
