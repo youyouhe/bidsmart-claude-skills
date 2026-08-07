@@ -23,6 +23,7 @@ const {
   Footer,
   PageNumber,
   NumberFormat,
+  TableOfContents,
 } = require('docx');
 const { Packer, LineRuleType } = require('docx');
 
@@ -44,6 +45,11 @@ if (process.argv[2]) {
     headerText: arg.headerText || '',
     footerCompany: arg.footerCompany || '',
     excludeFiles: arg.excludeFiles || DEFAULT_EXCLUDE,
+    // insertToc: 在"目录"文件位置（或首个文件之后）插入 Word 原生 TOC 域
+    // （TOC \o "1-3" \h \z \u），带超链接跳转；域值由 DocScan/ONLYOFFICE
+    // 重算填充，或靠 updateFields 让 Word 打开时自动更新
+    insertToc: arg.insertToc === true,
+    tocTitle: arg.tocTitle || '目  录',
   };
 } else {
   CONFIG = {
@@ -52,7 +58,22 @@ if (process.argv[2]) {
     headerText: process.env.DOCX_HEADER || '',
     footerCompany: process.env.DOCX_FOOTER || '',
     excludeFiles: DEFAULT_EXCLUDE,
+    insertToc: process.env.DOCX_INSERT_TOC === '1',
+    tocTitle: process.env.DOCX_TOC_TITLE || '目  录',
   };
+}
+
+// 生成目录域元素（标题段 + TOC 域 + 分页符）
+function buildTocElements() {
+  return [
+    new Paragraph({
+      children: [new TextRun({ text: CONFIG.tocTitle, bold: true, size: 32 })],
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 240 },
+    }),
+    new TableOfContents('目录', { hyperlink: true, headingStyleRange: '1-3' }),
+    new Paragraph({ children: [new PageBreak()] }),
+  ];
 }
 
 // 读取所有.md文件
@@ -526,11 +547,25 @@ async function generateDocx() {
 
   const sections = [];
   let imageCount = 0;
+  let tocInserted = false;
+  let afterFirstFilePos = -1;
 
   // 处理每个Markdown文件
   for (const filePath of mdFiles) {
     const fileName = path.basename(filePath);
     console.log(`处理: ${fileName}`);
+
+    // insertToc 时，"目录"文件（如 00-目录.md）的位置替换为 Word 原生 TOC 域，
+    // 其静态表格内容不进入文档（TOC 域由 ONLYOFFICE/Word 自动填充）
+    if (CONFIG.insertToc && !tocInserted && /目录/.test(fileName)) {
+      if (sections.length > 0) {
+        sections.push(new Paragraph({ children: [new PageBreak()] }));
+      }
+      sections.push(...buildTocElements());
+      tocInserted = true;
+      console.log('  → 已替换为动态目录域（TOC field）');
+      continue;
+    }
 
     try {
       const elements = parseMdContent(filePath);
@@ -550,9 +585,18 @@ async function generateDocx() {
       }
 
       sections.push(...elements);
+      if (afterFirstFilePos < 0) afterFirstFilePos = sections.length;
     } catch (error) {
       console.error(`  错误: ${error.message}`);
     }
+  }
+
+  // insertToc 但文件清单中没有"目录"文件 → 退化为插入到首个文件之后
+  if (CONFIG.insertToc && !tocInserted) {
+    const pos = afterFirstFilePos > 0 ? afterFirstFilePos : 0;
+    sections.splice(pos, 0, ...buildTocElements());
+    tocInserted = true;
+    console.log('未找到"目录"文件，目录域已插入到首个文件之后');
   }
 
   console.log();
@@ -562,6 +606,9 @@ async function generateDocx() {
 
   // 创建文档
   const doc = new Document({
+    // insertToc 时让 Word/WPS 打开文档时自动更新域（TOC 页码兜底填充，
+    // 不依赖 DocScan 重算是否执行）
+    ...(CONFIG.insertToc ? { features: { updateFields: true } } : {}),
     sections: [
       {
         properties: {
