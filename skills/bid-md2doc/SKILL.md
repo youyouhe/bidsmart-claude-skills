@@ -264,44 +264,42 @@ LLM 分析返回的段落列表，为索引表中的每个附件找到正文中�
 3. **如精确匹配失败（HTTP 400）**，尝试缩短 keyword（取前 10 字）或选用附件名称本身作为 keyword 重试
 4. **keyword 必须出现在 body 段落中**，不能出现在表格单元格内。如果附件名称只在表格中出现，跳过该项
 
-**3.3.3 逐个插入交叉引用**
+**3.3.3 组装批量条目（不逐条调用）**
 
-对索引表中需要页码的每一行：
+对索引表中需要页码的每一行，生成一个批量条目：
 
-调用 `docscan(operation: "crossref", fid: "<fid>", keyword: "<正文中唯一的关键文本>", cellPath: "table[{N}].row[{R}].cell[{C}]", paragraphPath: "paragraph[{P}]")`（keyword 全文唯一时 `paragraphPath` 可省略）。
+```json
+{ "keyword": "<正文中唯一的关键文本>", "cellPath": "table[{N}].row[{R}].cell[{C}]", "paragraphPath": "paragraph[{P}]" }
+```
 
 参数说明：
 - `keyword`：正文中要打书签的精确文本（必须在 body 段落中，不能在表格内）
 - `cellPath`：目标单元格路径，从 3.3.1 的 tables 输出中获取
 - `paragraphPath`：**当 keyword 在多个段落中出现时必须提供**，从 3.3.2 的 preview 输出中获取段落路径以消歧；如果 keyword 全文唯一则可省略
 
-DocScan 内部自动完成：
-1. 在正文 keyword 处打书签
-2. 在目标单元格插入 PAGEREF 字段（自动识别"第……页"模式拼接）
-3. 调用 ONLYOFFICE 重算真实页码并写回
+条目暂存，与 3.3.4 的响应表条目合并后，在 3.3.5 一次性提交。
 
-**错误恢复**：
-| HTTP 状态 | 含义 | 处理 |
-|-----------|------|------|
-| 200 | 成功 | 记录 `✅` |
-| 400 "keyword not found" | 文本不在正文中 | 尝试缩短 keyword 重试一次；仍失败则记录 `⚠️ 跳过：keyword未找到` |
-| 400 "matches N paragraphs" | keyword 歧义 | 添加 `paragraphPath` 重试；无法确定时记录 `⚠️ 跳过：歧义` |
-| 500 | 字段重算失败 | 记录 `⚠️ 跳过：ONLYOFFICE重算失败`，通常为 Docker 容器问题 |
+**3.3.4 响应表页码条目（映射含 `response_crossrefs` 时执行）**
 
-**注意**：
-- crossref 每次调用都会触发 ONLYOFFICE 字段重算（涉及 Docker 容器通信），单次耗时约 3-8 秒
-- 索引表有多行时需逐个调用，总耗时与行数成正比
-
-**3.3.4 响应表页码回填（映射含 `response_crossrefs` 时执行）**
-
-技术/商务响应表的"报价文件位置页码"类列，S6/S7 填写的是锚点章节标题、S8 已解析为 `response_crossrefs` 映射。索引表处理完后继续执行：
+技术/商务响应表的"报价文件位置页码"类列，S6/S7 填写的是锚点章节标题、S8 已解析为 `response_crossrefs` 映射。索引表条目组装完后继续：
 
 1. **过滤本册条目**：多册模式下，仅处理 `source_file` 属于当前 docx 的 includeFiles 的条目（跨册条目 S8 已跳过，不会出现在映射中）
 2. **定位响应表**：`docscan(operation: "tables", fid)` 列出全部表格，按 `table_signature`（表头前 3 列）匹配定位目标表；页码列索引 = 表头中含"页码"（或"位置"）的单元格列号。表未匹配 → 记录 `⚠️ 跳过：响应表未找到（table_signature: ...）`
-3. **逐行回填**：在目标表中找"序号"列值 == `row_key` 的首个数据行，对其页码列单元格（`cellPath`）调用 `crossref`。每行只应有一个 keyword（S8 已按"一格一锚点"约束收敛）——DocScan 对同一单元格是清空重建语义，重复插入只保留最后一个域
-4. **错误处理**：keyword 匹配/歧义/重算失败的恢复策略同 3.3.3；行未找到 → 记录 `⚠️ 跳过：序号 {row_key} 未匹配`
+3. **逐行组装条目**：在目标表中找"序号"列值 == `row_key` 的首个数据行，其页码列单元格即 cellPath；`keywords` 中每个锚点章节标题生成一个条目（**一格多锚点正式支持**：同一 cellPath 多个条目，crossref_batch 首条 replace、后续 append，多个页码域共存可各自跳转）。行未找到 → 记录 `⚠️ 跳过：序号 {row_key} 未匹配`
 
 回填效果示例：单元格原内容 `3.2 接口设计` → 回填后显示 `3.2 接口设计第4页`（章节锚点+真实页码，评委可直接跳转）。
+
+**3.3.5 批量提交（crossref_batch，每册一次调用）**
+
+将 3.3.3 与 3.3.4 组装的所有条目合并，**一次调用**完成插入+重算：
+
+```
+docscan(operation: "crossref_batch", fid: "<fid>", items: [...])
+```
+
+- 返回 `total/succeeded/failed/recalc` 汇总 + 逐条 status。`bad_cell_path`/`keyword_not_found`/`ambiguous` 等失败条目逐条记录 `⚠️`（ambiguous 可带上 candidates 的 paragraphPath 单独用单条 `crossref` 补插一次）
+- **兜底**：若 `crossref_batch` 返回 HTTP 404（DocScan 版本过旧无此接口），回退为逐条调用 `crossref`（注意逐条模式每次调用都触发 ONLYOFFICE 重算，3-8 秒/条，大批量时有会话超时风险——应在完成摘要中标注"DocScan 未升级"）
+- 批量模式下耗时与条目数解耦（单次重算 3-8 秒），不再需要逐条等待
 
 #### 3.4 下载增强后的 docx + 落盘校验（强制）
 
@@ -323,7 +321,7 @@ print(len(re.findall(r'PAGEREF', doc)))
 - **为 0 或不符 → 增强未落盘**（download 未执行/覆盖错文件/会话中断）：先重新 download 一次；仍不符 → 从 upload 重做该册增强。**禁止带着 0 页码的文档交付，也禁止在完成摘要里虚报交叉引用成功数**
 - 未执行任何 crossref（无索引表且无 response_crossrefs）的册 → 跳过校验
 
-**会话时间预算提醒**：crossref 每次调用触发 ONLYOFFICE 全文字段重算（3-8 秒/次）。单册 crossref 超过 40 条时，仅重算就需 2-5 分钟——务必把 enhance+download 安排在会话前段连续完成，不要在 enhance 中途插入其他耗时操作。
+**会话时间预算提醒**：批量模式（crossref_batch）每册仅一次 ONLYOFFICE 重算（3-8 秒），enhance 已不再是耗时瓶颈；但落盘校验仍为强制步骤——批量接口的成功计数不等于文件已下载覆盖。仅当回退到逐条 crossref（旧版 DocScan）时，才需警惕"每次调用 3-8 秒 × 条目数"的线性耗时。
 
 ### 4. 报告生成结果
 
