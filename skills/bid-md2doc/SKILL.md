@@ -313,12 +313,17 @@ docscan(operation: "crossref_batch", fid: "<fid>", items: [...])
 python3 -c "
 import zipfile, re
 doc = zipfile.ZipFile('<outputFile 绝对路径>').read('word/document.xml').decode('utf-8')
-print(len(re.findall(r'PAGEREF', doc)))
+fields = len(re.findall(r'PAGEREF', doc))
+# 可见文本层面的页码渲染值（含死文本），与域数分离统计
+visible = len(re.findall(r'第\d+页', ''.join(re.findall(r'<w:t[^>]*>([^<]*)</w:t>', doc))))
+print(f'PAGEREF域={fields} 可见页码={visible}')
 "
 ```
 
-- 本次该册成功的 crossref 数为 N → docx 中 PAGEREF 数必须 **== N**
-- **为 0 或不符 → 增强未落盘**（download 未执行/覆盖错文件/会话中断）：先重新 download 一次；仍不符 → 从 upload 重做该册增强。**禁止带着 0 页码的文档交付，也禁止在完成摘要里虚报交叉引用成功数**
+**两层断言，缺一不可**（教训：DocScan crossref_batch 曾漏检——域数恒定但单元格里死文本逐次累积，只数域发现不了）：
+1. **结构层**：本次该册成功的 crossref 数为 N → docx 中 PAGEREF 域数必须 **== N**；为 0 或不符 → 增强未落盘（download 未执行/覆盖错文件/会话中断），先重新 download 一次，仍不符 → 从 upload 重做该册增强
+2. **内容层**：可见文本中"第N页"样式的数量应与 PAGEREF 域数一致（每个活域渲染一个页码）。**可见页码数明显多于域数 → 单元格有死文本残留**（旧页码文本没清干净），打开文档抽查响应表单元格，确认渲染内容是"锚点标题第X页"且无重复废页码
+- **禁止带着 0 页码或死文本的文档交付，也禁止在完成摘要里虚报交叉引用成功数**
 - 未执行任何 crossref（无索引表且无 response_crossrefs）的册 → 跳过校验
 
 **会话时间预算提醒**：批量模式（crossref_batch）每册仅一次 ONLYOFFICE 重算（3-8 秒），enhance 已不再是耗时瓶颈；但落盘校验仍为强制步骤——批量接口的成功计数不等于文件已下载覆盖。仅当回退到逐条 crossref（旧版 DocScan）时，才需警惕"每次调用 3-8 秒 × 条目数"的线性耗时。
